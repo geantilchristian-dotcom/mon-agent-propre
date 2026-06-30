@@ -3,7 +3,7 @@ services:
     name: mon-agent-propre
     runtime: node
     buildCommand: >
-      npm install -g pnpm &&
+      corepack enable &&
       pnpm install --frozen-lockfile &&
       BASE_PATH=/ pnpm --filter @workspace/agent-ide run build &&
       pnpm --filter @workspace/api-server run build
