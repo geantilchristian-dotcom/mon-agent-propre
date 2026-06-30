@@ -7,6 +7,19 @@ import {
   GitCommit, FilePlus, FilePen, FileX, ExternalLink,
 } from "lucide-react";
 
+/* ------------------------------------------------------------------ */
+/*  Font constants                                                      */
+/* ------------------------------------------------------------------ */
+
+/** UI prose — headers, labels, bubbles, input */
+const SANS = "'Inter', 'Segoe UI', system-ui, sans-serif";
+/** Code, file paths, commit SHAs, model labels */
+const MONO = "'JetBrains Mono', 'Fira Code', ui-monospace, monospace";
+
+/* ------------------------------------------------------------------ */
+/*  Props / Types                                                       */
+/* ------------------------------------------------------------------ */
+
 interface ChatPanelProps {
   currentPath: string | null;
   onApplyCode?: (code: string) => void;
@@ -19,8 +32,11 @@ interface Message {
   filesChanged?: string[];
   commitSha?: string;
   model?: string;
-  isThinking?: boolean;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Copy button                                                         */
+/* ------------------------------------------------------------------ */
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -34,6 +50,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={handle}
       title="Copier"
+      style={{ fontFamily: SANS }}
       className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors
         ${copied ? "text-green-400" : "text-zinc-400 hover:text-white"}`}
     >
@@ -43,22 +60,49 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Code block — MONO font                                              */
+/* ------------------------------------------------------------------ */
+
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
   return (
     <div className="my-2 rounded-lg overflow-hidden border border-white/10">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-white/10">
-        <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">{lang || "text"}</span>
+      {/* Language label row */}
+      <div
+        className="flex items-center justify-between px-3 py-1.5 border-b border-white/10"
+        style={{ background: "#161b22" }}
+      >
+        <span
+          className="uppercase tracking-wider"
+          style={{ fontFamily: MONO, fontSize: 10, color: "#6e7681" }}
+        >
+          {lang || "text"}
+        </span>
         <CopyButton text={code} />
       </div>
+      {/* Code body — MONO */}
       <pre
-        className="overflow-auto text-[0.72rem] leading-relaxed font-mono text-zinc-100 p-3 m-0"
-        style={{ background: "#0d1117", maxHeight: "360px" }}
+        style={{
+          fontFamily: MONO,
+          fontSize: 12,
+          lineHeight: "20px",
+          background: "#0d1117",
+          color: "#c9d1d9",
+          padding: "12px 14px",
+          margin: 0,
+          overflowX: "auto",
+          maxHeight: 340,
+        }}
       >
         <code>{code}</code>
       </pre>
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Parse prose + fenced code blocks                                    */
+/* ------------------------------------------------------------------ */
 
 function parseContent(content: string) {
   const parts: React.ReactNode[] = [];
@@ -68,31 +112,53 @@ function parseContent(content: string) {
 
   while ((match = regex.exec(content)) !== null) {
     const before = content.slice(last, match.index);
-    if (before) parts.push(<span key={`t-${match.index}`} className="whitespace-pre-wrap">{before}</span>);
+    if (before) {
+      parts.push(
+        <span
+          key={`t-${match.index}`}
+          className="whitespace-pre-wrap"
+          style={{ fontFamily: SANS, fontSize: 13, lineHeight: "1.65" }}
+        >
+          {before}
+        </span>
+      );
+    }
     parts.push(<CodeBlock key={`c-${match.index}`} lang={match[1] ?? ""} code={match[2] ?? ""} />);
     last = match.index + match[0].length;
   }
 
   const tail = content.slice(last);
-  if (tail) parts.push(<span key="tail" className="whitespace-pre-wrap">{tail}</span>);
+  if (tail) {
+    parts.push(
+      <span
+        key="tail"
+        className="whitespace-pre-wrap"
+        style={{ fontFamily: SANS, fontSize: 13, lineHeight: "1.65" }}
+      >
+        {tail}
+      </span>
+    );
+  }
   return parts;
 }
 
+/* ------------------------------------------------------------------ */
+/*  File change badge — MONO for path                                   */
+/* ------------------------------------------------------------------ */
+
 function FileChangeBadge({ path }: { path: string }) {
-  const ext = path.split(".").pop() ?? "";
-  const isNew = false;
-  const isDelete = false;
-
-  const Icon = isDelete ? FileX : isNew ? FilePlus : FilePen;
-  const color = isDelete ? "text-red-400" : isNew ? "text-green-400" : "text-blue-400";
-
+  const Icon = FilePen;
   return (
-    <div className={`flex items-center gap-1.5 text-[11px] font-mono ${color} py-0.5`}>
+    <div className="flex items-center gap-1.5 py-0.5" style={{ color: "#61afef" }}>
       <Icon className="w-3 h-3 shrink-0" />
-      <span className="truncate">{path}</span>
+      <span className="truncate" style={{ fontFamily: MONO, fontSize: 11 }}>{path}</span>
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Agent result card                                                   */
+/* ------------------------------------------------------------------ */
 
 function AgentResultCard({ msg }: { msg: Message }) {
   const hasChanges = (msg.filesChanged?.length ?? 0) > 0;
@@ -100,18 +166,18 @@ function AgentResultCard({ msg }: { msg: Message }) {
 
   return (
     <div className="group w-full max-w-[95%]">
-      <div className="bg-muted rounded-lg rounded-tl-sm overflow-hidden text-sm">
-        {/* AI explanation */}
-        <div className="px-3 pt-3 pb-2 text-foreground">
+      <div className="rounded-lg rounded-tl-sm overflow-hidden" style={{ background: "#161b22", border: "1px solid #21262d" }}>
+        {/* AI prose — SANS */}
+        <div className="px-3 pt-3 pb-2" style={{ color: "#c9d1d9", fontFamily: SANS }}>
           {parseContent(msg.content)}
         </div>
 
         {/* Changed files panel */}
         {hasChanges && (
-          <div className="border-t border-white/5 bg-black/20 px-3 py-2">
-            <div className="flex items-center gap-2 mb-1.5">
-              <GitCommit className="w-3.5 h-3.5 text-green-400" />
-              <span className="text-[11px] font-semibold text-green-400 uppercase tracking-wider">
+          <div style={{ borderTop: "1px solid #21262d", background: "#0d1117", padding: "8px 12px" }}>
+            <div className="flex items-center gap-2 mb-2">
+              <GitCommit className="w-3.5 h-3.5" style={{ color: "#3fb950" }} />
+              <span style={{ fontFamily: SANS, fontSize: 11, fontWeight: 600, color: "#3fb950", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 {msg.filesChanged!.length} fichier{msg.filesChanged!.length > 1 ? "s" : ""} modifié{msg.filesChanged!.length > 1 ? "s" : ""}
               </span>
               {msg.commitSha && (
@@ -119,36 +185,44 @@ function AgentResultCard({ msg }: { msg: Message }) {
                   href={`${repoUrl}/commit/${msg.commitSha}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="ml-auto flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                  className="ml-auto flex items-center gap-1 hover:text-blue-300 transition-colors"
+                  style={{ fontFamily: SANS, fontSize: 10.5, color: "#61afef" }}
                 >
                   <ExternalLink className="w-3 h-3" />
                   Voir sur GitHub
                 </a>
               )}
             </div>
+
             <div className="space-y-0.5">
-              {msg.filesChanged!.map((f) => (
-                <FileChangeBadge key={f} path={f} />
-              ))}
+              {msg.filesChanged!.map((f) => <FileChangeBadge key={f} path={f} />)}
             </div>
+
             {msg.commitSha && (
-              <div className="mt-2 text-[10px] text-muted-foreground font-mono">
-                commit <span className="text-zinc-300">{msg.commitSha.slice(0, 7)}</span> — Render redéployera automatiquement
+              <div className="mt-2" style={{ fontFamily: MONO, fontSize: 10.5, color: "#6e7681" }}>
+                commit <span style={{ color: "#8b949e" }}>{msg.commitSha.slice(0, 7)}</span>
+                <span style={{ fontFamily: SANS, marginLeft: 4 }}>— Render redéployera automatiquement</span>
               </div>
             )}
           </div>
         )}
       </div>
 
+      {/* Model + copy — MONO for model name */}
       <div className="flex items-center justify-between mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="text-[10px] text-muted-foreground/50 pl-1 flex items-center gap-1">
-          <Zap className="w-2.5 h-2.5" />{msg.model ?? "Agent IA"}
+        <span className="flex items-center gap-1 pl-1" style={{ fontFamily: MONO, fontSize: 10, color: "#6e7681" }}>
+          <Zap className="w-2.5 h-2.5" />
+          {msg.model ?? "Agent IA"}
         </span>
         <CopyButton text={msg.content} />
       </div>
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/*  Status types                                                        */
+/* ------------------------------------------------------------------ */
 
 type AgentStatus = "idle" | "thinking" | "reading" | "writing" | "done" | "error";
 
@@ -162,13 +236,17 @@ const STATUS_LABELS: Record<AgentStatus, string> = {
 };
 
 const STATUS_COLORS: Record<AgentStatus, string> = {
-  idle:     "bg-muted-foreground/40",
-  thinking: "bg-yellow-400",
-  reading:  "bg-blue-400",
-  writing:  "bg-orange-400",
-  done:     "bg-green-400",
-  error:    "bg-red-400",
+  idle:     "#6e7681",
+  thinking: "#e5c07b",
+  reading:  "#61afef",
+  writing:  "#d19a66",
+  done:     "#3fb950",
+  error:    "#f85149",
 };
+
+/* ------------------------------------------------------------------ */
+/*  Main component                                                      */
+/* ------------------------------------------------------------------ */
 
 export function ChatPanel({ currentPath }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -180,7 +258,7 @@ export function ChatPanel({ currentPath }: ChatPanelProps) {
   const agentMutation = useRunAgent();
   const resetMutation = useResetChat();
 
-  const { data: fileData } = useReadGithubFile(
+  const { data: _fileData } = useReadGithubFile(
     { path: currentPath || "" },
     { query: { enabled: !!currentPath, queryKey: getReadGithubFileQueryKey({ path: currentPath || "" }) } }
   );
@@ -232,42 +310,57 @@ export function ChatPanel({ currentPath }: ChatPanelProps) {
   const isPending = agentMutation.isPending;
 
   return (
-    <div className="flex flex-col h-full bg-sidebar/50">
-      {/* Header */}
-      <div className="p-3 border-b border-border flex items-center justify-between bg-muted/30 shrink-0">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-          <Bot className="w-3.5 h-3.5" />
-          Agent IA
-        </h2>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleReset}
-          disabled={resetMutation.isPending || isPending} title="Réinitialiser">
+    <div className="flex flex-col h-full" style={{ background: "#010409", fontFamily: SANS }}>
+
+      {/* ── Header ── */}
+      <div
+        className="flex items-center justify-between px-3 shrink-0"
+        style={{ height: 36, borderBottom: "1px solid #21262d" }}
+      >
+        <div className="flex items-center gap-2">
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#3fb950", boxShadow: "0 0 5px #3fb950" }} />
+          <span style={{ fontFamily: SANS, fontSize: 12, fontWeight: 600, color: "#c9d1d9", letterSpacing: "0.01em" }}>
+            Agent IA
+          </span>
+        </div>
+        <button
+          onClick={handleReset}
+          disabled={resetMutation.isPending || isPending}
+          title="Réinitialiser la conversation"
+          className="flex items-center justify-center rounded hover:bg-white/5 transition-colors"
+          style={{ width: 22, height: 22, color: "#6e7681" }}
+        >
           {resetMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
-        </Button>
+        </button>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-4" ref={scrollRef}>
+      {/* ── Messages ── */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: "12px 10px" }} ref={scrollRef}>
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-center space-y-3 px-4">
-            <Bot className="w-10 h-10 opacity-15" />
-            <div>
-              <p className="text-sm font-medium mb-1">Agent de codage autonome</p>
-              <p className="text-xs opacity-70">
-                Demandez-moi d'ajouter, modifier ou supprimer quelque chose dans votre projet. Je lis le code, applique les changements et les pousse directement sur GitHub.
+          /* Empty state */
+          <div className="h-full flex flex-col items-center justify-center text-center" style={{ padding: "0 12px" }}>
+            <Bot className="w-9 h-9 mb-3" style={{ color: "#6e7681", opacity: 0.4 }} />
+            <p style={{ fontFamily: SANS, fontSize: 13, fontWeight: 600, color: "#8b949e", marginBottom: 4 }}>
+              Agent de codage autonome
+            </p>
+            <p style={{ fontFamily: SANS, fontSize: 12, color: "#6e7681", lineHeight: 1.6, marginBottom: 16 }}>
+              Décrivez ce que vous voulez faire. L'agent lit votre projet, applique les changements et les pousse sur GitHub.
+            </p>
+            <div style={{ width: "100%", background: "#161b22", border: "1px solid #21262d", borderRadius: 8, padding: "10px 12px" }}>
+              <p style={{ fontFamily: SANS, fontSize: 10.5, fontWeight: 600, color: "#6e7681", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+                Exemples
               </p>
-            </div>
-            <div className="text-xs text-muted-foreground/50 space-y-1 text-left bg-muted/20 rounded p-3 w-full">
-              <p className="font-medium mb-2 text-muted-foreground">Exemples :</p>
               {[
-                "Ajoute un bouton de dark mode dans le header",
-                "Corrige l'erreur dans Sidebar.tsx",
+                "Ajoute une page de connexion",
                 "Crée un composant Modal réutilisable",
-                "Refactorise les appels API en custom hooks",
+                "Corrige l'erreur dans Sidebar.tsx",
+                "Ajoute un bouton dark mode dans le header",
               ].map((ex) => (
                 <button
                   key={ex}
-                  className="block w-full text-left hover:text-foreground transition-colors py-0.5"
                   onClick={() => { setInput(ex); inputRef.current?.focus(); }}
+                  className="block w-full text-left hover:text-foreground transition-colors"
+                  style={{ fontFamily: SANS, fontSize: 12, color: "#8b949e", padding: "3px 0", cursor: "pointer" }}
                 >
                   → {ex}
                 </button>
@@ -275,82 +368,163 @@ export function ChatPanel({ currentPath }: ChatPanelProps) {
             </div>
           </div>
         ) : (
-          messages.map((msg, i) => (
-            <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-              {msg.role === "user" ? (
-                <div className="max-w-[90%]">
-                  <div className="bg-primary text-primary-foreground rounded-lg rounded-tr-sm px-3 py-2 text-sm whitespace-pre-wrap">
-                    {msg.content}
-                  </div>
-                  {msg.contextFile && (
-                    <div className="mt-0.5 flex items-center justify-end text-[10px] text-muted-foreground">
-                      <FileCode className="w-3 h-3 mr-1" />{msg.contextFile}
+          <div className="space-y-4">
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
+                {msg.role === "user" ? (
+                  /* ── User bubble — SANS, conversational ── */
+                  <div style={{ maxWidth: "88%" }}>
+                    <div
+                      style={{
+                        fontFamily: SANS,
+                        fontSize: 13,
+                        lineHeight: 1.6,
+                        fontWeight: 400,
+                        background: "#1f6feb",
+                        color: "#ffffff",
+                        borderRadius: "12px 12px 2px 12px",
+                        padding: "8px 12px",
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {msg.content}
                     </div>
-                  )}
-                </div>
-              ) : (
-                <AgentResultCard msg={msg} />
-              )}
-            </div>
-          ))
+                    {msg.contextFile && (
+                      <div
+                        className="flex items-center justify-end mt-0.5 gap-1"
+                        style={{ fontFamily: MONO, fontSize: 10, color: "#6e7681" }}
+                      >
+                        <FileCode className="w-3 h-3" />
+                        {msg.contextFile}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  /* ── Agent card — prose in SANS, code in MONO ── */
+                  <AgentResultCard msg={msg} />
+                )}
+              </div>
+            ))}
+          </div>
         )}
 
-        {/* Thinking animation */}
+        {/* Thinking indicator */}
         {isPending && (
-          <div className="flex items-start">
-            <div className="bg-muted text-foreground rounded-lg rounded-tl-sm px-4 py-3 text-sm max-w-[90%]">
-              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                <span>{STATUS_LABELS[status]}</span>
+          <div className="flex items-start mt-4">
+            <div
+              style={{
+                background: "#161b22",
+                border: "1px solid #21262d",
+                borderRadius: "2px 12px 12px 12px",
+                padding: "10px 14px",
+                maxWidth: "90%",
+              }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Loader2 className="w-3 h-3 animate-spin" style={{ color: STATUS_COLORS[status] }} />
+                <span style={{ fontFamily: SANS, fontSize: 12, color: STATUS_COLORS[status] }}>
+                  {STATUS_LABELS[status]}
+                </span>
               </div>
               <span className="flex space-x-1">
-                <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" />
-                <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0.4s" }} />
+                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "#6e7681" }} />
+                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "#6e7681", animationDelay: "0.15s" }} />
+                <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "#6e7681", animationDelay: "0.3s" }} />
               </span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Input */}
-      <div className="p-3 border-t border-border shrink-0 bg-background">
+      {/* ── Input area ── */}
+      <div style={{ padding: "10px 10px 8px", borderTop: "1px solid #21262d" }}>
         {currentPath && (
-          <div className="mb-2 flex items-center text-xs text-primary/80 bg-primary/10 px-2 py-1 rounded-sm w-fit">
-            <FileCode className="w-3 h-3 mr-1.5" />
-            <span>Contexte : {currentPath.split("/").pop()}</span>
+          <div
+            className="flex items-center gap-1.5 mb-2 w-fit"
+            style={{
+              fontFamily: MONO,
+              fontSize: 10.5,
+              color: "#61afef",
+              background: "rgba(97,175,239,0.08)",
+              border: "1px solid rgba(97,175,239,0.2)",
+              borderRadius: 4,
+              padding: "2px 8px",
+            }}
+          >
+            <FileCode className="w-3 h-3" />
+            {currentPath.split("/").pop()}
           </div>
         )}
-        <div className="relative flex items-end gap-2">
+
+        <div style={{ position: "relative" }}>
           <Textarea
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Demandez une modification, ajout ou suppression…"
-            className="pr-10 min-h-[40px] py-2 max-h-[180px] resize-none text-sm bg-muted/30 border-muted-foreground/20 focus-visible:ring-primary/50"
+            placeholder="Décrivez ce que vous voulez faire…"
             disabled={isPending}
             data-testid="input-chat-message"
+            style={{
+              fontFamily: SANS,
+              fontSize: 13,
+              lineHeight: 1.6,
+              background: "#161b22",
+              border: "1px solid #30363d",
+              borderRadius: 8,
+              color: "#c9d1d9",
+              resize: "none",
+              minHeight: 42,
+              maxHeight: 160,
+              padding: "9px 38px 9px 12px",
+              width: "100%",
+              outline: "none",
+            }}
+            className="focus-visible:ring-0 focus-visible:outline-none"
           />
-          <Button size="icon" variant="ghost"
-            className="absolute right-2 bottom-1.5 h-6 w-6 text-primary hover:text-primary hover:bg-primary/20"
+          <button
             onClick={handleSend}
             disabled={!input.trim() || isPending}
-            data-testid="button-send-chat">
-            <Send className="w-3.5 h-3.5" />
-          </Button>
+            data-testid="button-send-chat"
+            style={{
+              position: "absolute", right: 8, bottom: 8,
+              width: 26, height: 26, borderRadius: 6,
+              background: input.trim() && !isPending ? "#238636" : "#21262d",
+              color: input.trim() && !isPending ? "#fff" : "#6e7681",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "background 0.15s",
+              cursor: input.trim() && !isPending ? "pointer" : "default",
+            }}
+          >
+            <Send style={{ width: 13, height: 13 }} />
+          </button>
         </div>
-        <p className="text-[10px] text-muted-foreground/40 mt-1.5 text-center">
-          L'agent lit votre projet, applique les changements et commit sur GitHub
+
+        <p
+          className="text-center mt-1.5"
+          style={{ fontFamily: SANS, fontSize: 10, color: "#6e7681" }}
+        >
+          L'agent lit, modifie et commit directement sur GitHub
         </p>
       </div>
 
-      {/* Status bar */}
-      <div className="px-3 py-1.5 border-t border-border bg-muted/20 flex items-center gap-2 shrink-0">
-        <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[status]} ${
-          isPending ? "animate-pulse" : ""
-        }`} />
-        <span className="text-[10px] text-muted-foreground truncate">{STATUS_LABELS[status]}</span>
+      {/* ── Status bar ── */}
+      <div
+        className="flex items-center gap-2 shrink-0"
+        style={{ height: 24, padding: "0 10px", borderTop: "1px solid #21262d", background: "#0a0e14" }}
+      >
+        <span
+          style={{
+            width: 6, height: 6, borderRadius: "50%",
+            background: STATUS_COLORS[status],
+            flexShrink: 0,
+            boxShadow: isPending ? `0 0 6px ${STATUS_COLORS[status]}` : "none",
+            transition: "background 0.3s, box-shadow 0.3s",
+          }}
+        />
+        <span style={{ fontFamily: SANS, fontSize: 10.5, color: "#6e7681", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {STATUS_LABELS[status]}
+        </span>
       </div>
     </div>
   );
