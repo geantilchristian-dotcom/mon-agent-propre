@@ -2,71 +2,95 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Agent IDE Pro</title>
+    <title>Agent IDE | Interface Moderne</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Fira+Code&display=swap" rel="stylesheet">
     <style>
-        :root { --bg: #1e1e1e; --sidebar: #252526; --accent: #007acc; }
-        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #fff; font-family: sans-serif; }
-        .sidebar { width: 260px; background: var(--sidebar); padding: 15px; border-right: 1px solid #333; }
+        :root { --bg: #18181b; --panel: #27272a; --text: #e4e4e7; --accent: #3b82f6; --border: #3f3f46; }
+        
+        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow: hidden; }
+        
+        /* Sidebar */
+        .sidebar { width: 280px; background: var(--panel); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .sidebar input { background: #18181b; border: 1px solid var(--border); padding: 10px; color: white; border-radius: 6px; }
+        .sidebar button { background: var(--accent); color: white; border: none; padding: 10px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+        
+        /* Main Layout */
         .main { flex: 1; display: flex; flex-direction: column; }
-        #editor { flex: 1; padding: 20px; background: #000; color: #e0e0e0; font-family: monospace; overflow: auto; white-space: pre-wrap; outline: none; }
-        .toolbar { padding: 10px; background: #252526; display: flex; gap: 10px; }
-        .chat-zone { height: 180px; background: #1e1e1e; padding: 10px; border-top: 1px solid #333; }
+        .toolbar { padding: 12px 20px; background: #27272a; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+        
+        #editor { flex: 1; padding: 25px; background: #09090b; color: #d4d4d8; font-family: 'Fira Code', monospace; font-size: 14px; overflow: auto; outline: none; line-height: 1.6; }
+        
+        .chat-zone { height: 220px; background: var(--panel); border-top: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+        #messages { flex: 1; overflow-y: auto; font-size: 13px; color: #a1a1aa; }
+        
+        ul { list-style: none; padding: 0; }
+        li { padding: 8px 12px; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        li:hover { background: #3f3f46; }
     </style>
 </head>
 <body>
-    <div class="sidebar">
-        <input id="token" placeholder="GitHub Token" style="width:100%"><br><br>
-        <input id="repo" placeholder="Utilisateur/Repo" style="width:100%"><br><br>
-        <button onclick="connecter()">Connexion Dépôt</button>
-        <ul id="file-list"></ul>
+
+<div class="sidebar">
+    <h3 style="margin:0">Configuration</h3>
+    <input id="token" placeholder="GitHub Token">
+    <input id="repo" placeholder="Utilisateur/Repo">
+    <button onclick="connecter()">Connecter l'Agent</button>
+    <div id="file-list"></div>
+</div>
+
+<div class="main">
+    <div class="toolbar">
+        <span id="filename" style="font-weight: 600;">Aucun fichier</span>
+        <button onclick="sauvegarder()" style="background:#059669; border:none; color:white; padding:5px 15px; border-radius:4px; cursor:pointer;">Enregistrer</button>
     </div>
-    <div class="main">
-        <div class="toolbar">
-            <button onclick="sauvegarder()" style="background:#28a745">Enregistrer le fichier</button>
-        </div>
-        <div id="editor" contenteditable="true">Sélectionnez un fichier...</div>
-        <div class="chat-zone">
-            <div id="messages" style="height:100px; overflow-y:auto; font-size:12px;"></div>
-            <input id="user-msg" style="width:80%" placeholder="Demandez une modification...">
-            <button onclick="envoyer()">Envoyer</button>
+    <div id="editor" contenteditable="true">Sélectionnez un fichier pour éditer...</div>
+    <div class="chat-zone">
+        <div id="messages"></div>
+        <div style="display:flex; gap:10px;">
+            <input id="user-msg" style="flex:1; background:#18181b; border:1px solid #3f3f46; color:white; padding:8px; border-radius:4px;" placeholder="Question...">
+            <button onclick="envoyer()" style="padding:0 15px; background:var(--accent); color:white; border:none; border-radius:4px;">Go</button>
         </div>
     </div>
-    <input type="hidden" id="current-path">
-    <input type="hidden" id="current-sha">
+</div>
 
-    <script>
-        async function connecter() {
-            const token = document.getElementById('token').value;
-            const repo = document.getElementById('repo').value;
-            await fetch('/api/configurer', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ token, repo }) });
-            const res = await fetch('/api/fichiers');
-            const files = await res.json();
-            document.getElementById('file-list').innerHTML = files.map(f => f.type==='file' ? `<li onclick="lireFichier('${f.path}')">📄 ${f.name}</li>` : `<li>📁 ${f.name}</li>`).join('');
-        }
+<input type="hidden" id="current-path">
+<input type="hidden" id="current-sha">
 
-        async function lireFichier(path) {
-            const res = await fetch(`/api/lire?path=${encodeURIComponent(path)}`);
-            const data = await res.json();
-            document.getElementById('editor').innerText = data.content;
-            document.getElementById('current-path').value = path;
-            document.getElementById('current-sha').value = data.sha;
-        }
+<script>
+    // Vos fonctions JavaScript restent les mêmes...
+    async function connecter() {
+        const token = document.getElementById('token').value;
+        const repo = document.getElementById('repo').value;
+        await fetch('/api/configurer', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ token, repo }) });
+        const res = await fetch('/api/fichiers');
+        const files = await res.json();
+        document.getElementById('file-list').innerHTML = `<ul>` + files.map(f => f.type==='file' ? `<li onclick="lireFichier('${f.path}')">📄 ${f.name}</li>` : `<li>📁 ${f.name}</li>`).join('') + `</ul>`;
+    }
 
-        async function sauvegarder() {
-            const path = document.getElementById('current-path').value;
-            const content = document.getElementById('editor').innerText;
-            const sha = document.getElementById('current-sha').value;
-            const res = await fetch('/api/ecrire', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ path, content, sha }) });
-            const data = await res.json();
-            alert(data.message);
-        }
+    async function lireFichier(path) {
+        const res = await fetch(`/api/lire?path=${encodeURIComponent(path)}`);
+        const data = await res.json();
+        document.getElementById('editor').innerText = data.content;
+        document.getElementById('filename').innerText = path;
+        document.getElementById('current-path').value = path;
+        document.getElementById('current-sha').value = data.sha;
+    }
 
-        async function envoyer() {
-            const msg = document.getElementById('user-msg').value;
-            const res = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ message: msg }) });
-            const data = await res.json();
-            document.getElementById('messages').innerHTML += `<div><b>IA:</b> ${data.response}</div>`;
-        }
-    </script>
+    async function sauvegarder() {
+        const path = document.getElementById('current-path').value;
+        const content = document.getElementById('editor').innerText;
+        const sha = document.getElementById('current-sha').value;
+        const res = await fetch('/api/ecrire', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ path, content, sha }) });
+        alert('Sauvegardé !');
+    }
+
+    async function envoyer() {
+        const msg = document.getElementById('user-msg').value;
+        const res = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ message: msg }) });
+        const data = await res.json();
+        document.getElementById('messages').innerHTML += `<div style="margin-bottom:8px"><b>IA:</b> ${data.response}</div>`;
+        document.getElementById('user-msg').value = '';
+    }
+</script>
 </body>
 </html>
