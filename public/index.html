@@ -2,39 +2,38 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Agent IDE | Replit Style</title>
+    <title>Agent IDE</title>
     <style>
-        :root { --bg: #111; --panel: #1a1a1a; --border: #333; --accent: #007acc; }
-        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #eee; font-family: sans-serif; overflow: hidden; }
+        /* Reset et base */
+        * { box-sizing: border-box; }
+        body { margin: 0; display: flex; height: 100vh; background: #111; color: #eee; font-family: sans-serif; overflow: hidden; }
         
-        /* Sidebar Explorateur */
-        .sidebar { width: 260px; background: var(--panel); border-right: 1px solid var(--border); padding: 15px; display: flex; flex-direction: column; }
-        #file-list { list-style: none; padding: 0; margin-top: 20px; }
-        #file-list li { padding: 8px; cursor: pointer; border-radius: 4px; color: #aaa; }
-        #file-list li:hover { background: #2a2a2a; color: white; }
+        /* 1. Sidebar Fixe */
+        .sidebar { width: 260px; min-width: 260px; background: #1a1a1a; border-right: 1px solid #333; display: flex; flex-direction: column; padding: 15px; }
         
-        /* Zone Centrale */
-        .editor-container { flex: 1; display: flex; flex-direction: column; }
-        #editor { flex: 1; background: #000; color: #0f0; padding: 25px; outline: none; font-family: 'Fira Code', monospace; overflow: auto; white-space: pre-wrap; }
+        /* 2. Zone Éditeur (Centre) */
+        .editor-container { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        #editor { flex: 1; background: #000; color: #0f0; padding: 20px; outline: none; overflow: auto; white-space: pre-wrap; font-family: monospace; }
+        .toolbar { padding: 10px; background: #222; border-bottom: 1px solid #333; }
         
-        /* Panel Chat (Droite) */
-        .chat-panel { width: 350px; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
-        #messages { flex: 1; padding: 15px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
-        .chat-input-zone { padding: 15px; border-top: 1px solid var(--border); }
+        /* 3. Panel Chat (Droite) */
+        .chat-panel { width: 350px; min-width: 350px; background: #1a1a1a; border-left: 1px solid #333; display: flex; flex-direction: column; }
+        #messages { flex: 1; padding: 15px; overflow-y: auto; }
+        .chat-input-zone { padding: 15px; border-top: 1px solid #333; }
     </style>
 </head>
 <body>
 
     <div class="sidebar">
-        <input id="token" placeholder="GitHub Token" style="padding:8px; background:#000; border:1px solid #333; color:white;">
-        <input id="repo" placeholder="User/Repo" style="padding:8px; background:#000; border:1px solid #333; color:white; margin-top:5px;">
-        <button onclick="connecter()" style="margin-top:10px; cursor:pointer;">Connecter</button>
-        <ul id="file-list"></ul>
+        <input id="token" placeholder="GitHub Token" style="width:100%; padding:8px; margin-bottom:5px;">
+        <input id="repo" placeholder="User/Repo" style="width:100%; padding:8px;">
+        <button onclick="connecter()" style="margin-top:5px; width:100%;">Connecter</button>
+        <ul id="file-list" style="list-style:none; padding:0; flex:1; overflow-y:auto;"></ul>
     </div>
 
     <div class="editor-container">
-        <div style="padding:10px; background:#222;">
-            <button onclick="sauvegarder()">Enregistrer modifications</button>
+        <div class="toolbar">
+            <button onclick="sauvegarder()">Enregistrer</button>
         </div>
         <div id="editor" contenteditable="true"></div>
     </div>
@@ -42,46 +41,12 @@
     <div class="chat-panel">
         <div id="messages"></div>
         <div class="chat-input-zone">
-            <input id="user-msg" style="width:100%; padding:10px; background:#000; color:white; border:1px solid #333;" 
-                   placeholder="Demander une modif (Entrée pour envoyer)..." 
-                   onkeypress="if(event.key==='Enter') envoyer()">
+            <input id="user-msg" style="width:100%; padding:10px;" placeholder="Message..." onkeypress="if(event.key==='Enter') envoyer()">
         </div>
     </div>
 
     <script>
-        let currentPath = "", currentSha = "";
-        
-        async function connecter() {
-            const token = document.getElementById('token').value;
-            const repo = document.getElementById('repo').value;
-            await fetch('/api/configurer', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ token, repo }) });
-            const res = await fetch('/api/fichiers');
-            const files = await res.json();
-            document.getElementById('file-list').innerHTML = files.map(f => 
-                `<li onclick="lireFichier('${f.path}')">${f.type==='file'?'📄':'📁'} ${f.name}</li>`).join('');
-        }
-
-        async function lireFichier(path) {
-            const res = await fetch(`/api/lire?path=${encodeURIComponent(path)}`);
-            const data = await res.json();
-            document.getElementById('editor').innerText = data.content;
-            currentPath = path; currentSha = data.sha;
-        }
-
-        async function sauvegarder() {
-            await fetch('/api/ecrire', { method: 'POST', headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ path: currentPath, content: document.getElementById('editor').innerText, sha: currentSha }) });
-            alert('Sauvegardé avec succès !');
-        }
-
-        async function envoyer() {
-            const msg = document.getElementById('user-msg').value;
-            const res = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ message: msg, fileContent: document.getElementById('editor').innerText, fileName: currentPath }) });
-            const data = await res.json();
-            document.getElementById('messages').innerHTML += `<div><b>IA:</b> ${data.response}</div>`;
-            document.getElementById('user-msg').value = '';
-        }
+        // ... (vos fonctions connecter, lireFichier, sauvegarder, envoyer)
     </script>
 </body>
 </html>
