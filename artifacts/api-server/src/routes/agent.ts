@@ -185,7 +185,10 @@ async function callGroq(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model, messages: groqMessages, max_tokens: 8192, temperature: 0.2 }),
   });
-  if (!res.ok) return { ok: false, err: `Groq ${res.status}` };
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return { ok: false, err: `Groq ${res.status}: ${body.slice(0, 200)}` };
+  }
   const d = (await res.json()) as { choices: { message: { content: string } }[] };
   return { ok: true, text: d.choices[0]?.message?.content ?? "" };
 }
@@ -213,7 +216,10 @@ async function callGemini(
       }),
     }
   );
-  if (!res.ok) return { ok: false, err: `Gemini ${res.status}` };
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return { ok: false, err: `Gemini ${res.status}: ${body.slice(0, 200)}` };
+  }
   const d = (await res.json()) as {
     candidates: { content: { parts: { text: string }[] } }[];
   };
@@ -271,10 +277,13 @@ async function callLLM(
   preferred: PreferredModel = "auto"
 ): Promise<{ text: string; model: string }> {
 
+  const errors: string[] = [];
+
   const tryGroq = async () => {
     if (!groqKey) return null;
     const r = await callGroq(groqKey, messages, image);
     if (r.ok) return { text: r.text, model: image ? "Groq · Llama 3.2 Vision" : "Groq · Llama 3.3 70B" };
+    errors.push(`Groq: ${r.err}`);
     return null;
   };
 
@@ -282,6 +291,7 @@ async function callLLM(
     if (!claudeKey) return null;
     const r = await callClaude(claudeKey, messages, image);
     if (r.ok) return { text: r.text, model: image ? "Claude 3.5 Sonnet · Vision" : "Claude 3.5 Sonnet" };
+    errors.push(`Claude: ${r.err}`);
     return null;
   };
 
@@ -291,6 +301,7 @@ async function callLLM(
     const user = messages.filter((m) => m.role !== "system").map((m) => m.content).join("\n\n");
     const r = await callGemini(geminiKey, sys, user, image);
     if (r.ok) return { text: r.text, model: "Gemini 2.0 Flash" };
+    errors.push(`Gemini: ${r.err}`);
     return null;
   };
 
@@ -307,7 +318,8 @@ async function callLLM(
   }
 
   if (!result) {
-    throw new Error("Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY ou GEMINI_API_KEY.");
+    const detail = errors.length > 0 ? ` Erreurs: ${errors.join(" | ")}` : " Vérifiez vos clés API.";
+    throw new Error(`Toutes les APIs IA ont échoué.${detail}`);
   }
   return result;
 }
