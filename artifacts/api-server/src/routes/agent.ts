@@ -170,6 +170,7 @@ async function callGroq(
   const visionModel = "llama-3.2-11b-vision-preview";
   const textModels = [
     "llama-3.3-70b-versatile",
+    "llama-3.1-70b-versatile",
     "llama-3.1-8b-instant",
     "gemma2-9b-it",
     "mixtral-8x7b-32768",
@@ -192,10 +193,16 @@ async function callGroq(
   const lastErrors: string[] = [];
 
   for (const model of modelsToTry) {
+    // For smaller models, truncate to last 6 messages to avoid 413
+    const isSmallModel = model.includes("8b") || model.includes("gemma") || model.includes("mixtral");
+    const msgs = isSmallModel
+      ? [messages[0]!, ...messages.slice(1).slice(-5)].filter(Boolean)
+      : buildMessages(model);
+
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages: buildMessages(model), max_tokens: 8192, temperature: 0.2 }),
+      body: JSON.stringify({ model, messages: isSmallModel ? msgs : buildMessages(model), max_tokens: 4096, temperature: 0.2 }),
     });
     if (res.ok) {
       const d = (await res.json()) as { choices: { message: { content: string } }[] };
@@ -203,8 +210,8 @@ async function callGroq(
     }
     const body = await res.text().catch(() => "");
     lastErrors.push(`${model} ${res.status}: ${body.slice(0, 100)}`);
-    // Only retry on 429 (rate limit) — stop on auth errors
-    if (res.status !== 429) break;
+    // Retry on 429 (rate limit) or 413 (too large) — stop on auth errors
+    if (res.status !== 429 && res.status !== 413) break;
   }
 
   return { ok: false, err: `Groq: ${lastErrors.join(" → ")}` };
@@ -218,8 +225,9 @@ async function callGemini(
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
   const geminiModels = [
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-8b-latest",
   ];
 
   const userParts: object[] = [{ text: userMessage }];
