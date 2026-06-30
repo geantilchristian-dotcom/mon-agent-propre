@@ -70,6 +70,7 @@ import React, { useState, useEffect } from "react";
             currentPath={currentPath}
             onSelectFile={setCurrentPath}
             isConnecting={configureMutation.isPending}
+            onNotify={showBanner}
           />
         </div>
 
