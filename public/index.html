@@ -2,83 +2,83 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Agent IDE Pro | Console de Développement</title>
+    <title>Agent IDE Pro</title>
     <style>
-        :root { --bg: #1e1e1e; --sidebar: #252526; --accent: #007acc; --border: #3c3c3c; }
-        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #ccc; font-family: 'Segoe UI', sans-serif; }
-        
-        /* Sidebar */
+        :root { --bg: #1e1e1e; --sidebar: #252526; --accent: #007acc; --border: #333; }
+        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #fff; font-family: sans-serif; }
         .sidebar { width: 260px; background: var(--sidebar); border-right: 1px solid var(--border); padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .sidebar h3 { font-size: 14px; color: #fff; margin-bottom: 5px; }
-        input { background: #3c3c3c; border: 1px solid var(--border); padding: 8px; color: white; border-radius: 3px; }
-        button { background: var(--accent); color: white; border: none; padding: 10px; cursor: pointer; border-radius: 3px; font-weight: bold; }
-        #file-list { list-style: none; padding: 0; margin-top: 20px; }
-        #file-list li { padding: 8px; cursor: pointer; border-bottom: 1px solid #333; }
-        #file-list li:hover { background: #2a2d2e; }
-
-        /* Main Content */
         .main { flex: 1; display: flex; flex-direction: column; }
-        #editor { flex: 1; padding: 20px; background: #0d0d0d; color: #d4d4d4; font-family: 'Consolas', monospace; overflow: auto; white-space: pre-wrap; border-bottom: 1px solid var(--border); }
-        .chat-container { height: 250px; background: var(--sidebar); display: flex; flex-direction: column; padding: 15px; }
-        #messages { flex: 1; overflow-y: auto; margin-bottom: 10px; border: 1px solid var(--border); padding: 10px; background: #1e1e1e; }
-        .chat-input { display: flex; gap: 10px; }
+        #editor { flex: 1; padding: 20px; background: #000; color: #00ff00; font-family: monospace; overflow: auto; white-space: pre-wrap; }
+        .chat-zone { height: 200px; border-top: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 5px; }
+        input, textarea { background: #3c3c3c; border: 1px solid var(--border); color: white; padding: 8px; border-radius: 4px; }
+        button { background: var(--accent); color: white; border: none; padding: 8px; cursor: pointer; border-radius: 4px; }
+        ul { list-style: none; padding: 0; }
+        li { cursor: pointer; padding: 5px 0; color: #ccc; }
+        li:hover { color: white; }
     </style>
 </head>
 <body>
 
 <div class="sidebar">
-    <h3>Configuration</h3>
+    <strong>Configuration</strong>
     <input id="token" placeholder="GitHub Token">
     <input id="repo" placeholder="Utilisateur/Repo">
     <button onclick="connecter()">Connexion Dépôt</button>
-    <hr style="width:100%; border:0; border-top:1px solid #444">
-    <h3>Explorateur</h3>
+    <hr style="width:100%">
+    <strong>Explorateur</strong>
     <ul id="file-list"></ul>
 </div>
 
 <div class="main">
     <div id="editor">Sélectionnez un projet pour commencer...</div>
-    <div class="chat-container">
-        <div id="messages"></div>
-        <div class="chat-input">
-            <input id="prompt" style="flex:1" placeholder="Demandez une modification...">
+    <div class="chat-zone">
+        <div id="messages" style="flex:1; overflow-y:auto; font-size: 12px;"></div>
+        <div style="display:flex; gap:10px;">
+            <input id="user-msg" style="flex:1" placeholder="Demandez une modification...">
             <button onclick="envoyer()">Envoyer</button>
         </div>
     </div>
 </div>
 
 <script>
-    let currentRepo = "";
-    
     async function connecter() {
         const token = document.getElementById('token').value;
         const repo = document.getElementById('repo').value;
-        currentRepo = repo;
-        await fetch('/api/configurer', {
+        const res = await fetch('/api/configurer', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ token, repo })
         });
-        const res = await fetch('/api/fichiers');
-        const files = await res.json();
-        document.getElementById('file-list').innerHTML = files.map(f => `<li onclick="lireFichier('${f.path}')">${f.name}</li>`).join('');
+        const data = await res.json();
+        alert(data.message);
+        
+        // Charger la liste des fichiers après connexion
+        const filesRes = await fetch('/api/fichiers');
+        const files = await filesRes.json();
+        document.getElementById('file-list').innerHTML = files.map(f => 
+            `<li onclick="lireFichier('${f.path}')">📄 ${f.name}</li>`
+        ).join('');
     }
 
     async function lireFichier(path) {
-        const res = await fetch(`/api/lire?path=${path}`);
+        const res = await fetch(`/api/lire?path=${encodeURIComponent(path)}`);
         const data = await res.json();
         document.getElementById('editor').innerText = data.content;
     }
 
     async function envoyer() {
-        const msg = document.getElementById('prompt').value;
+        const msg = document.getElementById('user-msg').value;
+        const messages = document.getElementById('messages');
+        messages.innerHTML += `<div><b>Vous:</b> ${msg}</div>`;
+        
         const res = await fetch('/api/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ message: msg })
         });
         const data = await res.json();
-        document.getElementById('messages').innerHTML += `<div><b>IA:</b> ${data.response}</div>`;
+        messages.innerHTML += `<div><b>IA:</b> ${data.response}</div>`;
+        document.getElementById('user-msg').value = '';
     }
 </script>
 </body>
