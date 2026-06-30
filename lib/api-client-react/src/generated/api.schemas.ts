@@ -66,6 +66,21 @@ export interface ChatResponse {
   response: string;
 }
 
+export interface AgentInput {
+  message: string;
+  /** @nullable */
+  currentFile?: string | null;
+}
+
+export interface AgentResult {
+  response: string;
+  filesChanged: string[];
+  /** @nullable */
+  commitSha?: string | null;
+  /** @nullable */
+  model?: string | null;
+}
+
 export type ListGithubFilesParams = {
 path?: string;
 };

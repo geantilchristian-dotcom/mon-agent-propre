@@ -1,308 +1,357 @@
 import React, { useState, useRef, useEffect } from "react";
-  import { useSendChatMessage, useResetChat, useReadGithubFile, getReadGithubFileQueryKey } from "@workspace/api-client-react";
-  import { Button } from "@/components/ui/button";
-  import { Textarea } from "@/components/ui/textarea";
-  import { Loader2, Send, RotateCcw, Bot, FileCode, Paperclip, X, Check, Zap, Copy } from "lucide-react";
+import { useRunAgent, useResetChat, useReadGithubFile, getReadGithubFileQueryKey } from "@workspace/api-client-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Loader2, Send, RotateCcw, Bot, FileCode, Check, Zap, Copy,
+  GitCommit, FilePlus, FilePen, FileX, ExternalLink,
+} from "lucide-react";
 
-  interface ChatPanelProps {
-    currentPath: string | null;
-    onApplyCode?: (code: string) => void;
-  }
+interface ChatPanelProps {
+  currentPath: string | null;
+  onApplyCode?: (code: string) => void;
+}
 
-  interface Message {
-    role: "user" | "ai";
-    content: string;
-    contextFile?: string;
-    imageThumbnail?: string;
-    model?: string;
-  }
+interface Message {
+  role: "user" | "agent";
+  content: string;
+  contextFile?: string;
+  filesChanged?: string[];
+  commitSha?: string;
+  model?: string;
+  isThinking?: boolean;
+}
 
-  type ModelStatus = "idle" | "thinking" | "ok" | "error";
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handle = () => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    });
+  };
+  return (
+    <button
+      onClick={handle}
+      title="Copier"
+      className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors
+        ${copied ? "text-green-400" : "text-zinc-400 hover:text-white"}`}
+    >
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? "Copié !" : "Copier"}
+    </button>
+  );
+}
 
-  function CopyButton({ text, className = "" }: { text: string; className?: string }) {
-    const [copied, setCopied] = useState(false);
-    const handle = () => {
-      navigator.clipboard.writeText(text).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1800);
-      });
-    };
-    return (
-      <button
-        onClick={handle}
-        title="Copier"
-        className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors
-          ${copied ? "text-green-400" : "text-zinc-400 hover:text-white"}
-          ${className}`}
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  return (
+    <div className="my-2 rounded-lg overflow-hidden border border-white/10">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-white/10">
+        <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">{lang || "text"}</span>
+        <CopyButton text={code} />
+      </div>
+      <pre
+        className="overflow-auto text-[0.72rem] leading-relaxed font-mono text-zinc-100 p-3 m-0"
+        style={{ background: "#0d1117", maxHeight: "360px" }}
       >
-        {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-        {copied ? "Copié !" : "Copier"}
-      </button>
-    );
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
+function parseContent(content: string) {
+  const parts: React.ReactNode[] = [];
+  const regex = /```([\w+-]*)\n?([\s\S]*?)```/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    const before = content.slice(last, match.index);
+    if (before) parts.push(<span key={`t-${match.index}`} className="whitespace-pre-wrap">{before}</span>);
+    parts.push(<CodeBlock key={`c-${match.index}`} lang={match[1] ?? ""} code={match[2] ?? ""} />);
+    last = match.index + match[0].length;
   }
 
-  function CodeBlock({ lang, code, onApply }: { lang: string; code: string; onApply?: (c: string) => void }) {
-    const [applied, setApplied] = useState(false);
+  const tail = content.slice(last);
+  if (tail) parts.push(<span key="tail" className="whitespace-pre-wrap">{tail}</span>);
+  return parts;
+}
 
-    const handleApply = () => {
-      if (onApply) { onApply(code); setApplied(true); setTimeout(() => setApplied(false), 1800); }
-    };
+function FileChangeBadge({ path }: { path: string }) {
+  const ext = path.split(".").pop() ?? "";
+  const isNew = false;
+  const isDelete = false;
 
-    const displayLang = lang || "text";
+  const Icon = isDelete ? FileX : isNew ? FilePlus : FilePen;
+  const color = isDelete ? "text-red-400" : isNew ? "text-green-400" : "text-blue-400";
 
-    return (
-      <div className="my-2 rounded-lg overflow-hidden border border-white/10">
-        <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-white/10">
-          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">{displayLang}</span>
-          <div className="flex items-center gap-2">
-            <CopyButton text={code} />
-            {onApply && (
-              <button
-                onClick={handleApply}
-                className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors
-                  ${applied ? "text-green-400" : "text-blue-400 hover:text-blue-300"}`}
-              >
-                {applied ? <Check className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
-                {applied ? "Appliqué !" : "Appliquer"}
-              </button>
+  return (
+    <div className={`flex items-center gap-1.5 text-[11px] font-mono ${color} py-0.5`}>
+      <Icon className="w-3 h-3 shrink-0" />
+      <span className="truncate">{path}</span>
+    </div>
+  );
+}
+
+function AgentResultCard({ msg }: { msg: Message }) {
+  const hasChanges = (msg.filesChanged?.length ?? 0) > 0;
+  const repoUrl = "https://github.com/geantilchristian-dotcom/mon-agent-propre";
+
+  return (
+    <div className="group w-full max-w-[95%]">
+      <div className="bg-muted rounded-lg rounded-tl-sm overflow-hidden text-sm">
+        {/* AI explanation */}
+        <div className="px-3 pt-3 pb-2 text-foreground">
+          {parseContent(msg.content)}
+        </div>
+
+        {/* Changed files panel */}
+        {hasChanges && (
+          <div className="border-t border-white/5 bg-black/20 px-3 py-2">
+            <div className="flex items-center gap-2 mb-1.5">
+              <GitCommit className="w-3.5 h-3.5 text-green-400" />
+              <span className="text-[11px] font-semibold text-green-400 uppercase tracking-wider">
+                {msg.filesChanged!.length} fichier{msg.filesChanged!.length > 1 ? "s" : ""} modifié{msg.filesChanged!.length > 1 ? "s" : ""}
+              </span>
+              {msg.commitSha && (
+                <a
+                  href={`${repoUrl}/commit/${msg.commitSha}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-auto flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Voir sur GitHub
+                </a>
+              )}
+            </div>
+            <div className="space-y-0.5">
+              {msg.filesChanged!.map((f) => (
+                <FileChangeBadge key={f} path={f} />
+              ))}
+            </div>
+            {msg.commitSha && (
+              <div className="mt-2 text-[10px] text-muted-foreground font-mono">
+                commit <span className="text-zinc-300">{msg.commitSha.slice(0, 7)}</span> — Render redéployera automatiquement
+              </div>
             )}
           </div>
-        </div>
-        <pre
-          className="overflow-auto text-[0.72rem] leading-relaxed font-mono text-zinc-100 p-3 m-0"
-          style={{ background: "#0d1117", maxHeight: "400px" }}
-        >
-          <code>{code}</code>
-        </pre>
+        )}
       </div>
+
+      <div className="flex items-center justify-between mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="text-[10px] text-muted-foreground/50 pl-1 flex items-center gap-1">
+          <Zap className="w-2.5 h-2.5" />{msg.model ?? "Agent IA"}
+        </span>
+        <CopyButton text={msg.content} />
+      </div>
+    </div>
+  );
+}
+
+type AgentStatus = "idle" | "thinking" | "reading" | "writing" | "done" | "error";
+
+const STATUS_LABELS: Record<AgentStatus, string> = {
+  idle:     "Prêt — posez une question ou demandez une modification",
+  thinking: "L'agent analyse votre projet…",
+  reading:  "Lecture des fichiers en cours…",
+  writing:  "Application des changements sur GitHub…",
+  done:     "Modifications appliquées ✓",
+  error:    "Erreur de l'agent",
+};
+
+const STATUS_COLORS: Record<AgentStatus, string> = {
+  idle:     "bg-muted-foreground/40",
+  thinking: "bg-yellow-400",
+  reading:  "bg-blue-400",
+  writing:  "bg-orange-400",
+  done:     "bg-green-400",
+  error:    "bg-red-400",
+};
+
+export function ChatPanel({ currentPath }: ChatPanelProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [status, setStatus] = useState<AgentStatus>("idle");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const agentMutation = useRunAgent();
+  const resetMutation = useResetChat();
+
+  const { data: fileData } = useReadGithubFile(
+    { path: currentPath || "" },
+    { query: { enabled: !!currentPath, queryKey: getReadGithubFileQueryKey({ path: currentPath || "" }) } }
+  );
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, status]);
+
+  const handleSend = () => {
+    const text = input.trim();
+    if (!text || agentMutation.isPending) return;
+
+    setMessages(prev => [...prev, { role: "user", content: text, contextFile: currentPath ?? undefined }]);
+    setInput("");
+    setStatus("thinking");
+
+    agentMutation.mutate(
+      { data: { message: text, currentFile: currentPath ?? null } },
+      {
+        onSuccess: (data) => {
+          const d = data as { response: string; filesChanged: string[]; commitSha?: string | null; model?: string | null };
+          const hasChanges = d.filesChanged.length > 0;
+          setStatus(hasChanges ? "done" : "idle");
+          setTimeout(() => setStatus("idle"), hasChanges ? 4000 : 0);
+          setMessages(prev => [...prev, {
+            role: "agent",
+            content: d.response,
+            filesChanged: d.filesChanged,
+            commitSha: d.commitSha ?? undefined,
+            model: d.model ?? undefined,
+          }]);
+        },
+        onError: (err) => {
+          setStatus("error");
+          setTimeout(() => setStatus("idle"), 4000);
+          const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Erreur de l'agent";
+          setMessages(prev => [...prev, { role: "agent", content: `❌ ${message}`, filesChanged: [] }]);
+        },
+      }
     );
-  }
+  };
 
-  function parseContent(content: string, onApply?: (c: string) => void) {
-    const parts: React.ReactNode[] = [];
-    const regex = /```([\w+-]*)\n?([\s\S]*?)```/g;
-    let last = 0;
-    let match: RegExpExecArray | null;
+  const handleReset = () => {
+    resetMutation.mutate(undefined, {
+      onSuccess: () => { setMessages([]); setStatus("idle"); }
+    });
+  };
 
-    while ((match = regex.exec(content)) !== null) {
-      const before = content.slice(last, match.index);
-      if (before) parts.push(<span key={`t-${match.index}`} className="whitespace-pre-wrap">{before}</span>);
-      parts.push(
-        <CodeBlock key={`c-${match.index}`} lang={match[1] ?? ""} code={match[2] ?? ""} onApply={onApply} />
-      );
-      last = match.index + match[0].length;
-    }
+  const isPending = agentMutation.isPending;
 
-    const tail = content.slice(last);
-    if (tail) parts.push(<span key="tail" className="whitespace-pre-wrap">{tail}</span>);
-    return parts;
-  }
+  return (
+    <div className="flex flex-col h-full bg-sidebar/50">
+      {/* Header */}
+      <div className="p-3 border-b border-border flex items-center justify-between bg-muted/30 shrink-0">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Bot className="w-3.5 h-3.5" />
+          Agent IA
+        </h2>
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleReset}
+          disabled={resetMutation.isPending || isPending} title="Réinitialiser">
+          {resetMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+        </Button>
+      </div>
 
-  export function ChatPanel({ currentPath, onApplyCode }: ChatPanelProps) {
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [input, setInput] = useState("");
-    const [imageBase64, setImageBase64] = useState<string | null>(null);
-    const [imageMime, setImageMime] = useState<string | null>(null);
-    const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
-    const [activeModel, setActiveModel] = useState<string>("Groq · Llama 3.3 70B");
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-4" ref={scrollRef}>
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-center space-y-3 px-4">
+            <Bot className="w-10 h-10 opacity-15" />
+            <div>
+              <p className="text-sm font-medium mb-1">Agent de codage autonome</p>
+              <p className="text-xs opacity-70">
+                Demandez-moi d'ajouter, modifier ou supprimer quelque chose dans votre projet. Je lis le code, applique les changements et les pousse directement sur GitHub.
+              </p>
+            </div>
+            <div className="text-xs text-muted-foreground/50 space-y-1 text-left bg-muted/20 rounded p-3 w-full">
+              <p className="font-medium mb-2 text-muted-foreground">Exemples :</p>
+              {[
+                "Ajoute un bouton de dark mode dans le header",
+                "Corrige l'erreur dans Sidebar.tsx",
+                "Crée un composant Modal réutilisable",
+                "Refactorise les appels API en custom hooks",
+              ].map((ex) => (
+                <button
+                  key={ex}
+                  className="block w-full text-left hover:text-foreground transition-colors py-0.5"
+                  onClick={() => { setInput(ex); inputRef.current?.focus(); }}
+                >
+                  → {ex}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          messages.map((msg, i) => (
+            <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
+              {msg.role === "user" ? (
+                <div className="max-w-[90%]">
+                  <div className="bg-primary text-primary-foreground rounded-lg rounded-tr-sm px-3 py-2 text-sm whitespace-pre-wrap">
+                    {msg.content}
+                  </div>
+                  {msg.contextFile && (
+                    <div className="mt-0.5 flex items-center justify-end text-[10px] text-muted-foreground">
+                      <FileCode className="w-3 h-3 mr-1" />{msg.contextFile}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <AgentResultCard msg={msg} />
+              )}
+            </div>
+          ))
+        )}
 
-    const sendMutation = useSendChatMessage();
-    const resetMutation = useResetChat();
+        {/* Thinking animation */}
+        {isPending && (
+          <div className="flex items-start">
+            <div className="bg-muted text-foreground rounded-lg rounded-tl-sm px-4 py-3 text-sm max-w-[90%]">
+              <div className="flex items-center gap-2 text-muted-foreground text-xs mb-2">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>{STATUS_LABELS[status]}</span>
+              </div>
+              <span className="flex space-x-1">
+                <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" />
+                <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
+                <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0.4s" }} />
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
 
-    const { data: fileData } = useReadGithubFile(
-      { path: currentPath || "" },
-      { query: { enabled: !!currentPath, queryKey: getReadGithubFileQueryKey({ path: currentPath || "" }) } }
-    );
-
-    useEffect(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }, [messages, sendMutation.isPending]);
-
-    useEffect(() => {
-      if (sendMutation.isPending) setModelStatus("thinking");
-      else if (sendMutation.isError) setModelStatus("error");
-      else if (sendMutation.isSuccess) setModelStatus("ok");
-      else setModelStatus("idle");
-    }, [sendMutation.isPending, sendMutation.isError, sendMutation.isSuccess]);
-
-    const handleSend = () => {
-      if (!input.trim() && !imageBase64) return;
-      if (sendMutation.isPending) return;
-
-      const userMsg = input;
-      const fileContent = currentPath && fileData?.content ? fileData.content : undefined;
-      const fileName = currentPath || undefined;
-      const thumbnail = imageBase64 ? `data:${imageMime};base64,${imageBase64}` : undefined;
-
-      setMessages(prev => [...prev, { role: "user", content: userMsg, contextFile: fileName, imageThumbnail: thumbnail }]);
-      setInput("");
-
-      const pImg = imageBase64;
-      const pMime = imageMime;
-      setImageBase64(null);
-      setImageMime(null);
-
-      sendMutation.mutate(
-        { data: { message: userMsg, fileContent, fileName, imageBase64: pImg, imageMime: pMime } },
-        {
-          onSuccess: (data) => {
-            const d = data as { response: string; model?: string };
-            if (d.model) setActiveModel(d.model);
-            setMessages(prev => [...prev, { role: "ai", content: d.response, model: d.model }]);
-          },
-        }
-      );
-    };
-
-    const handleReset = () => {
-      resetMutation.mutate(undefined, {
-        onSuccess: () => { setMessages([]); setModelStatus("idle"); }
-      });
-    };
-
-    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        setImageBase64(base64);
-        setImageMime(file.type);
-      };
-      reader.readAsDataURL(file);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    };
-
-    const statusDot: Record<ModelStatus, { color: string; label: string; pulse: boolean }> = {
-      idle:     { color: "bg-muted-foreground/40", label: "Prêt",          pulse: false },
-      thinking: { color: "bg-yellow-400",          label: "Génère...",      pulse: true  },
-      ok:       { color: "bg-green-400",            label: "Réponse reçue", pulse: false },
-      error:    { color: "bg-red-400",              label: "Erreur",         pulse: false },
-    };
-    const { color, label, pulse } = statusDot[modelStatus];
-
-    return (
-      <div className="flex flex-col h-full bg-sidebar/50">
-        <div className="p-3 border-b border-border flex items-center justify-between bg-muted/30 shrink-0">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center">
-            <Bot className="w-3.5 h-3.5 mr-2" />
-            Agent Chat
-          </h2>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleReset}
-            disabled={resetMutation.isPending} title="Réinitialiser" data-testid="button-reset-chat">
-            {resetMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+      {/* Input */}
+      <div className="p-3 border-t border-border shrink-0 bg-background">
+        {currentPath && (
+          <div className="mb-2 flex items-center text-xs text-primary/80 bg-primary/10 px-2 py-1 rounded-sm w-fit">
+            <FileCode className="w-3 h-3 mr-1.5" />
+            <span>Contexte : {currentPath.split("/").pop()}</span>
+          </div>
+        )}
+        <div className="relative flex items-end gap-2">
+          <Textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder="Demandez une modification, ajout ou suppression…"
+            className="pr-10 min-h-[40px] py-2 max-h-[180px] resize-none text-sm bg-muted/30 border-muted-foreground/20 focus-visible:ring-primary/50"
+            disabled={isPending}
+            data-testid="input-chat-message"
+          />
+          <Button size="icon" variant="ghost"
+            className="absolute right-2 bottom-1.5 h-6 w-6 text-primary hover:text-primary hover:bg-primary/20"
+            onClick={handleSend}
+            disabled={!input.trim() || isPending}
+            data-testid="button-send-chat">
+            <Send className="w-3.5 h-3.5" />
           </Button>
         </div>
-
-        <div className="flex-1 overflow-y-auto p-3 space-y-4" ref={scrollRef}>
-          {!currentPath && messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-center space-y-3">
-              <FileCode className="w-8 h-8 opacity-20" />
-              <p className="text-sm px-4">Ouvrez un fichier pour donner du contexte à l'IA.</p>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-center space-y-3">
-              <Bot className="w-8 h-8 opacity-20" />
-              <p className="text-sm px-4">Je suis prêt à vous aider avec votre code.<br />Posez-moi une question.</p>
-            </div>
-          ) : (
-            messages.map((msg, i) => (
-              <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                {msg.role === "user" ? (
-                  <div className="group relative max-w-[90%]">
-                    <div className="bg-primary text-primary-foreground rounded-lg rounded-tr-sm px-3 py-2 text-sm">
-                      {msg.imageThumbnail && (
-                        <img src={msg.imageThumbnail} alt="Upload" className="max-w-[150px] rounded-md mb-2 object-contain" />
-                      )}
-                      <span className="whitespace-pre-wrap">{msg.content}</span>
-                    </div>
-                    <div className="flex justify-end mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <CopyButton text={msg.content} />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="group w-full max-w-[95%]">
-                    <div className="bg-muted text-foreground rounded-lg rounded-tl-sm px-3 py-2 text-sm">
-                      {parseContent(msg.content, onApplyCode)}
-                    </div>
-                    <div className="flex items-center justify-between mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <span className="text-[10px] text-muted-foreground/50 pl-1">{msg.model ?? activeModel}</span>
-                      <CopyButton text={msg.content} />
-                    </div>
-                  </div>
-                )}
-                {msg.contextFile && (
-                  <div className="mt-0.5 flex items-center text-[10px] text-muted-foreground">
-                    <FileCode className="w-3 h-3 mr-1" />{msg.contextFile}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-
-          {sendMutation.isPending && (
-            <div className="flex items-start">
-              <div className="bg-muted text-foreground rounded-lg rounded-tl-sm px-4 py-3 text-sm">
-                <span className="flex space-x-1">
-                  <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" />
-                  <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }} />
-                  <span className="w-1.5 h-1.5 bg-foreground/40 rounded-full animate-bounce" style={{ animationDelay: "0.4s" }} />
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="p-3 border-t border-border shrink-0 bg-background flex flex-col">
-          {currentPath && (
-            <div className="mb-2 flex items-center text-xs text-primary/80 bg-primary/10 px-2 py-1 rounded-sm w-fit">
-              <FileCode className="w-3 h-3 mr-1.5" />
-              <span>Contexte : {currentPath.split("/").pop()}</span>
-            </div>
-          )}
-          {imageBase64 && (
-            <div className="mb-2 relative w-16 h-16 rounded-md border border-border overflow-hidden group">
-              <img src={`data:${imageMime};base64,${imageBase64}`} className="w-full h-full object-cover" alt="Aperçu" />
-              <button className="absolute top-1 right-1 bg-black/50 rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={() => { setImageBase64(null); setImageMime(null); }}>
-                <X className="w-3 h-3 text-white" />
-              </button>
-            </div>
-          )}
-          <div className="relative flex items-center gap-2">
-            <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
-            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
-              onClick={() => fileInputRef.current?.click()}>
-              <Paperclip className="w-4 h-4" />
-            </Button>
-            <Textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Posez une question sur le code..."
-              className="pr-10 min-h-[40px] py-2 max-h-[200px] resize-none text-sm bg-muted/30 border-muted-foreground/20 focus-visible:ring-primary/50"
-              data-testid="input-chat-message"
-            />
-            <Button size="icon" variant="ghost"
-              className="absolute right-2 bottom-1.5 h-6 w-6 text-primary hover:text-primary hover:bg-primary/20"
-              onClick={handleSend}
-              disabled={(!input.trim() && !imageBase64) || sendMutation.isPending}
-              data-testid="button-send-chat">
-              <Send className="w-3.5 h-3.5" />
-            </Button>
-          </div>
-        </div>
-
-        <div className="px-3 py-1.5 border-t border-border bg-muted/20 flex items-center gap-2 shrink-0">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${color} ${pulse ? "animate-pulse" : ""}`} />
-          <span className="text-[10px] text-muted-foreground truncate">{label}</span>
-          <span className="ml-auto text-[10px] text-muted-foreground/50 truncate flex items-center gap-1">
-            <Zap className="w-2.5 h-2.5" />{activeModel}
-          </span>
-        </div>
+        <p className="text-[10px] text-muted-foreground/40 mt-1.5 text-center">
+          L'agent lit votre projet, applique les changements et commit sur GitHub
+        </p>
       </div>
-    );
-  }
-  
+
+      {/* Status bar */}
+      <div className="px-3 py-1.5 border-t border-border bg-muted/20 flex items-center gap-2 shrink-0">
+        <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[status]} ${
+          isPending ? "animate-pulse" : ""
+        }`} />
+        <span className="text-[10px] text-muted-foreground truncate">{STATUS_LABELS[status]}</span>
+      </div>
+    </div>
+  );
+}

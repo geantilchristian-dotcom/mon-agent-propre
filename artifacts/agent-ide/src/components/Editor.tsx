@@ -17,7 +17,7 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
   const [isDirty, setIsDirty] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  
+
   const { data: fileData, isLoading } = useReadGithubFile(
     { path: currentPath || "" },
     { query: { enabled: !!currentPath && connected, queryKey: getReadGithubFileQueryKey({ path: currentPath || "" }) } }
@@ -44,15 +44,15 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
 
   const handleSave = () => {
     if (!currentPath || !fileData?.sha) return;
-    
+
     writeMutation.mutate(
-      { 
-        data: { 
-          path: currentPath, 
-          content, 
-          sha: fileData.sha, 
-          message: `Update ${currentPath} via Agent IDE` 
-        } 
+      {
+        data: {
+          path: currentPath,
+          content,
+          sha: fileData.sha,
+          message: `Update ${currentPath} via Agent IDE`
+        }
       },
       {
         onSuccess: () => {
@@ -99,11 +99,11 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
           <span className="text-muted-foreground font-mono mr-2">{currentPath}</span>
           {isDirty && <span className="w-2 h-2 rounded-full bg-primary inline-block"></span>}
         </div>
-        
-        <Button 
-          size="sm" 
-          variant={isDirty ? "default" : "secondary"} 
-          className="h-7 text-xs" 
+
+        <Button
+          size="sm"
+          variant={isDirty ? "default" : "secondary"}
+          className="h-7 text-xs"
           disabled={!isDirty || writeMutation.isPending}
           onClick={handleSave}
           data-testid="button-save-file"
@@ -112,9 +112,9 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
           Save to GitHub
         </Button>
       </div>
-      
+
       <div className="flex-1 p-0 relative overflow-hidden bg-[#0d1117]">
-        <textarea 
+        <textarea
           className="absolute inset-0 w-full h-full p-4 bg-transparent text-foreground font-mono text-sm leading-relaxed resize-none focus:outline-none"
           value={content}
           onChange={(e) => {

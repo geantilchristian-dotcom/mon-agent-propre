@@ -113,3 +113,19 @@ export const ResetChatResponse = zod.object({
 })
 
 
+/**
+ * @summary Run the autonomous coding agent on the connected GitHub repo
+ */
+export const RunAgentBody = zod.object({
+  "message": zod.string(),
+  "currentFile": zod.string().nullish()
+})
+
+export const RunAgentResponse = zod.object({
+  "response": zod.string(),
+  "filesChanged": zod.array(zod.string()),
+  "commitSha": zod.string().nullish(),
+  "model": zod.string().nullish()
+})
+
+

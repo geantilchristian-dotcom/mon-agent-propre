@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './agentInput';
+export * from './agentResult';
 export * from './chatInput';
 export * from './chatResponse';
 export * from './githubConfig';

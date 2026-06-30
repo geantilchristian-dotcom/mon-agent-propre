@@ -7,6 +7,7 @@ import {
   WriteGithubFileBody,
   DeleteGithubFileBody,
 } from "@workspace/api-zod";
+import { setAgentGithub } from "./agent";
 
 const router: IRouter = Router();
 
@@ -27,8 +28,11 @@ router.post("/github/configure", (req, res) => {
     return;
   }
   octokit = new Octokit({ auth: token });
-  currentOwner = parts[0];
-  currentRepo = parts[1];
+  currentOwner = parts[0] ?? null;
+  currentRepo = parts[1] ?? null;
+
+  setAgentGithub(octokit, currentOwner!, currentRepo!);
+
   res.json({ success: true });
 });
 
@@ -136,7 +140,6 @@ router.post("/github/write", async (req, res) => {
       content: Buffer.from(content).toString("base64"),
     };
 
-    // Only include sha if provided (sha is absent for new file creation)
     if (sha) {
       params.sha = sha;
     }

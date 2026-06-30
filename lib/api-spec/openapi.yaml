@@ -14,6 +14,8 @@ tags:
     description: GitHub repository operations
   - name: chat
     description: AI chat operations
+  - name: agent
+    description: Autonomous coding agent
 paths:
   /healthz:
     get:
@@ -170,6 +172,29 @@ paths:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
 
+  /agent/run:
+    post:
+      operationId: runAgent
+      tags: [agent]
+      summary: Run the autonomous coding agent on the connected GitHub repo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentInput"
+      responses:
+        "200":
+          description: Agent result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResult"
+        "400":
+          description: Not configured
+        "500":
+          description: Agent error
+
 components:
   schemas:
     HealthStatus:
@@ -278,3 +303,30 @@ components:
           type: string
       required:
         - response
+
+    AgentInput:
+      type: object
+      properties:
+        message:
+          type: string
+        currentFile:
+          type: ["string", "null"]
+      required:
+        - message
+
+    AgentResult:
+      type: object
+      properties:
+        response:
+          type: string
+        filesChanged:
+          type: array
+          items:
+            type: string
+        commitSha:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+      required:
+        - response
+        - filesChanged

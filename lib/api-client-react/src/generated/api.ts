@@ -20,6 +20,8 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AgentInput,
+  AgentResult,
   ChatInput,
   ChatResponse,
   GithubConfig,
@@ -654,5 +656,75 @@ export const useResetChat = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getResetChatMutationOptions(options));
+    }
+
+export const getRunAgentUrl = () => {
+
+
+
+
+  return `/api/agent/run`
+}
+
+/**
+ * @summary Run the autonomous coding agent on the connected GitHub repo
+ */
+export const runAgent = async (agentInput: AgentInput, options?: RequestInit): Promise<AgentResult> => {
+
+  return customFetch<AgentResult>(getRunAgentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(agentInput)
+  }
+);}
+
+
+
+
+export const getRunAgentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runAgent>>, TError,{data: BodyType<AgentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runAgent>>, TError,{data: BodyType<AgentInput>}, TContext> => {
+
+const mutationKey = ['runAgent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runAgent>>, {data: BodyType<AgentInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  runAgent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunAgentMutationResult = NonNullable<Awaited<ReturnType<typeof runAgent>>>
+    export type RunAgentMutationBody = BodyType<AgentInput>
+    export type RunAgentMutationError = ErrorType<void>
+
+    /**
+ * @summary Run the autonomous coding agent on the connected GitHub repo
+ */
+export const useRunAgent = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runAgent>>, TError,{data: BodyType<AgentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runAgent>>,
+        TError,
+        {data: BodyType<AgentInput>},
+        TContext
+      > => {
+      return useMutation(getRunAgentMutationOptions(options));
     }
 
