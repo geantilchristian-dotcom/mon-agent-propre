@@ -3,8 +3,8 @@ services:
     name: mon-agent-propre
     runtime: node
     plan: free
-    buildCommand: >
-      npm install -g pnpm &&
+    buildCommand: >-
+      corepack enable &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @workspace/agent-ide run build &&
       pnpm --filter @workspace/api-server run build
