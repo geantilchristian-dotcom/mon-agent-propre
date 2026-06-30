@@ -5,6 +5,7 @@ import { Router, type IRouter } from "express";
 
   type GeminiPart = { text: string } | { inline_data: { mime_type: string; data: string } };
   type GeminiContent = { role: "user" | "model"; parts: GeminiPart[] };
+  type OpenAIMessage = { role: "system" | "user" | "assistant"; content: string | { type: string; text?: string; image_url?: { url: string } }[] };
 
   const SYSTEM_PROMPT = `Tu es un expert développeur et agent de modification de code. Ton rôle est d'analyser les fichiers fournis et de proposer des modifications chirurgicales et précises.
 
@@ -16,15 +17,35 @@ import { Router, type IRouter } from "express";
   - Si une image est fournie, analyse-la attentivement pour comprendre ce que l'utilisateur veut faire
   - Réponds en français sauf si le code l'exige autrement`;
 
-  let conversationHistory: GeminiContent[] = [];
+  let geminiHistory: GeminiContent[] = [];
+  let openAIHistory: OpenAIMessage[] = [];
+
+  async function callGroq(
+    apiKey: string,
+    messages: OpenAIMessage[]
+  ): Promise<{ ok: true; text: string } | { ok: false; status: number; message: string }> {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages, max_tokens: 8192, temperature: 0.7 }),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { choices: { message: { content: string } }[] };
+      return { ok: true, text: data.choices[0]?.message?.content ?? "" };
+    }
+    let msg = `Erreur Groq ${res.status}`;
+    if (res.status === 429) msg = "Limite Groq atteinte, basculement sur Gemini…";
+    if (res.status === 401) msg = "Clé Groq invalide (GROQ_API_KEY dans Render).";
+    return { ok: false, status: res.status, message: msg };
+  }
 
   async function callGemini(
     apiKey: string,
     contents: GeminiContent[],
-    retries = 2
+    retries = 1
   ): Promise<{ ok: true; text: string } | { ok: false; status: number; message: string }> {
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const response = await fetch(
+      const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
         {
           method: "POST",
@@ -36,80 +57,77 @@ import { Router, type IRouter } from "express";
           }),
         }
       );
-
-      if (response.ok) {
-        const data = (await response.json()) as {
-          candidates: { content: { parts: { text: string }[] } }[];
-        };
-        const text = data.candidates[0]?.content?.parts?.[0]?.text ?? "";
-        return { ok: true, text };
+      if (res.ok) {
+        const data = (await res.json()) as { candidates: { content: { parts: { text: string }[] } }[] };
+        return { ok: true, text: data.candidates[0]?.content?.parts?.[0]?.text ?? "" };
       }
-
-      // 429 = rate limit → wait and retry
-      if (response.status === 429 && attempt < retries) {
-        const waitMs = (attempt + 1) * 5000; // 5s, 10s
-        await new Promise(r => setTimeout(r, waitMs));
-        continue;
-      }
-
-      const errText = await response.text();
-      let friendlyMsg = `Erreur Gemini ${response.status}`;
-      if (response.status === 429) {
-        friendlyMsg = "Limite de requêtes atteinte (plan gratuit Gemini). Attendez quelques secondes et réessayez.";
-      } else if (response.status === 401 || response.status === 403) {
-        friendlyMsg = "Clé API Gemini invalide. Vérifiez GEMINI_API_KEY dans Render.";
-      }
-      return { ok: false, status: response.status, message: friendlyMsg };
+      if (res.status === 429 && attempt < retries) { await new Promise(r => setTimeout(r, 5000)); continue; }
+      let msg = `Erreur Gemini ${res.status}`;
+      if (res.status === 429) msg = "Limites Groq et Gemini atteintes. Attendez quelques secondes.";
+      if (res.status === 401 || res.status === 403) msg = "Clé Gemini invalide (GEMINI_API_KEY dans Render).";
+      return { ok: false, status: res.status, message: msg };
     }
-    return { ok: false, status: 429, message: "Limite de requêtes. Attendez quelques secondes et réessayez." };
+    return { ok: false, status: 429, message: "Toutes les limites atteintes. Réessayez dans quelques secondes." };
   }
 
   router.post("/chat/message", async (req, res) => {
     const parsed = SendChatMessageBody.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Invalid body" });
-      return;
-    }
+    if (!parsed.success) { res.status(400).json({ error: "Invalid body" }); return; }
 
     const { message, fileContent, fileName, imageBase64, imageMime } = parsed.data;
+    const groqKey   = process.env["GROQ_API_KEY"];
+    const geminiKey = process.env["GEMINI_API_KEY"];
 
-    const apiKey = process.env["GEMINI_API_KEY"];
-    if (!apiKey) {
-      res.status(500).json({ error: "GEMINI_API_KEY non configurée. Ajoutez-la dans Render → Environment." });
+    if (!groqKey && !geminiKey) {
+      res.status(500).json({ error: "Aucune clé IA configurée. Ajoutez GROQ_API_KEY ou GEMINI_API_KEY dans Render." });
       return;
     }
 
-    // Build user parts
-    const parts: GeminiPart[] = [];
     const textParts: string[] = [];
-    if (fileName && fileContent) {
-      textParts.push(`Fichier ouvert : ${fileName}\n\`\`\`\n${fileContent}\n\`\`\``);
-    }
+    if (fileName && fileContent) textParts.push(`Fichier ouvert : ${fileName}\n\`\`\`\n${fileContent}\n\`\`\``);
     textParts.push(message);
-    parts.push({ text: textParts.join("\n\n") });
+    const userText = textParts.join("\n\n");
 
-    if (imageBase64 && imageMime) {
-      parts.push({ inline_data: { mime_type: imageMime, data: imageBase64 } });
+    // ── Groq (primary) ────────────────────────────────────────────────────────
+    if (groqKey) {
+      const msgs: OpenAIMessage[] = [{ role: "system", content: SYSTEM_PROMPT }, ...openAIHistory];
+      const userContent: OpenAIMessage["content"] = imageBase64 && imageMime
+        ? [{ type: "text", text: userText }, { type: "image_url", image_url: { url: `data:${imageMime};base64,${imageBase64}` } }]
+        : userText;
+      msgs.push({ role: "user", content: userContent });
+
+      const result = await callGroq(groqKey, msgs);
+      if (result.ok) {
+        openAIHistory.push({ role: "user", content: userContent });
+        openAIHistory.push({ role: "assistant", content: result.text });
+        req.log.info({ model: "groq/llama-3.3-70b-versatile" }, "Chat OK");
+        res.json({ response: result.text, model: "Groq · Llama 3.3 70B" });
+        return;
+      }
+      if (result.status !== 429) { res.status(500).json({ error: result.message }); return; }
+      req.log.warn("Groq rate-limited, falling back to Gemini");
     }
 
-    conversationHistory.push({ role: "user", parts });
+    // ── Gemini (fallback) ────────────────────────────────────────────────────
+    if (!geminiKey) { res.status(429).json({ error: "Limite Groq atteinte et GEMINI_API_KEY non configurée." }); return; }
 
-    const result = await callGemini(apiKey, conversationHistory);
+    const parts: GeminiPart[] = [{ text: userText }];
+    if (imageBase64 && imageMime) parts.push({ inline_data: { mime_type: imageMime, data: imageBase64 } });
+    geminiHistory.push({ role: "user", parts });
 
+    const result = await callGemini(geminiKey, geminiHistory);
     if (!result.ok) {
-      req.log.error({ status: result.status }, result.message);
-      // Remove the last user message from history on error
-      conversationHistory.pop();
+      geminiHistory.pop();
       res.status(result.status === 429 ? 429 : 500).json({ error: result.message });
       return;
     }
-
-    conversationHistory.push({ role: "model", parts: [{ text: result.text }] });
-    res.json({ response: result.text });
+    geminiHistory.push({ role: "model", parts: [{ text: result.text }] });
+    res.json({ response: result.text, model: "Gemini 2.0 Flash" });
   });
 
   router.post("/chat/reset", (_req, res) => {
-    conversationHistory = [];
+    geminiHistory = [];
+    openAIHistory = [];
     res.json({ success: true });
   });
 
