@@ -6,6 +6,7 @@ services:
       buildCommand: >-
         npm install -g pnpm &&
         pnpm install --frozen-lockfile &&
+        pnpm --filter @workspace/agent-ide run build &&
         pnpm --filter @workspace/api-server run build
       startCommand: node artifacts/api-server/dist/index.mjs
       envVars:
@@ -13,10 +14,10 @@ services:
           value: production
         - key: PORT
           value: 3000
+        - key: BASE_PATH
+          value: /
         - key: OPENROUTER_KEY
           sync: false
         - key: SESSION_SECRET
           generateValue: true
-        - key: DATABASE_URL
-          sync: false
   
