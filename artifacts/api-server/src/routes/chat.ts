@@ -18,6 +18,52 @@ import { Router, type IRouter } from "express";
 
   let conversationHistory: GeminiContent[] = [];
 
+  async function callGemini(
+    apiKey: string,
+    contents: GeminiContent[],
+    retries = 2
+  ): Promise<{ ok: true; text: string } | { ok: false; status: number; message: string }> {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents,
+            generationConfig: { maxOutputTokens: 8192, temperature: 0.7 },
+          }),
+        }
+      );
+
+      if (response.ok) {
+        const data = (await response.json()) as {
+          candidates: { content: { parts: { text: string }[] } }[];
+        };
+        const text = data.candidates[0]?.content?.parts?.[0]?.text ?? "";
+        return { ok: true, text };
+      }
+
+      // 429 = rate limit → wait and retry
+      if (response.status === 429 && attempt < retries) {
+        const waitMs = (attempt + 1) * 5000; // 5s, 10s
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+
+      const errText = await response.text();
+      let friendlyMsg = `Erreur Gemini ${response.status}`;
+      if (response.status === 429) {
+        friendlyMsg = "Limite de requêtes atteinte (plan gratuit Gemini). Attendez quelques secondes et réessayez.";
+      } else if (response.status === 401 || response.status === 403) {
+        friendlyMsg = "Clé API Gemini invalide. Vérifiez GEMINI_API_KEY dans Render.";
+      }
+      return { ok: false, status: response.status, message: friendlyMsg };
+    }
+    return { ok: false, status: 429, message: "Limite de requêtes. Attendez quelques secondes et réessayez." };
+  }
+
   router.post("/chat/message", async (req, res) => {
     const parsed = SendChatMessageBody.safeParse(req.body);
     if (!parsed.success) {
@@ -29,13 +75,12 @@ import { Router, type IRouter } from "express";
 
     const apiKey = process.env["GEMINI_API_KEY"];
     if (!apiKey) {
-      res.status(500).json({ error: "GEMINI_API_KEY not configured" });
+      res.status(500).json({ error: "GEMINI_API_KEY non configurée. Ajoutez-la dans Render → Environment." });
       return;
     }
 
     // Build user parts
     const parts: GeminiPart[] = [];
-
     const textParts: string[] = [];
     if (fileName && fileContent) {
       textParts.push(`Fichier ouvert : ${fileName}\n\`\`\`\n${fileContent}\n\`\`\``);
@@ -49,43 +94,18 @@ import { Router, type IRouter } from "express";
 
     conversationHistory.push({ role: "user", parts });
 
-    try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents: conversationHistory,
-            generationConfig: {
-              maxOutputTokens: 8192,
-              temperature: 0.7,
-            },
-          }),
-        }
-      );
+    const result = await callGemini(apiKey, conversationHistory);
 
-      if (!response.ok) {
-        const text = await response.text();
-        req.log.error({ status: response.status, body: text }, "Gemini error");
-        res.status(500).json({ error: `Gemini error: ${response.status}` });
-        return;
-      }
-
-      const data = (await response.json()) as {
-        candidates: { content: { parts: { text: string }[] } }[];
-      };
-
-      const reply = data.candidates[0]?.content?.parts?.[0]?.text ?? "";
-      conversationHistory.push({ role: "model", parts: [{ text: reply }] });
-
-      res.json({ response: reply });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      req.log.error({ err: e }, "Chat error");
-      res.status(500).json({ error: msg });
+    if (!result.ok) {
+      req.log.error({ status: result.status }, result.message);
+      // Remove the last user message from history on error
+      conversationHistory.pop();
+      res.status(result.status === 429 ? 429 : 500).json({ error: result.message });
+      return;
     }
+
+    conversationHistory.push({ role: "model", parts: [{ text: result.text }] });
+    res.json({ response: result.text });
   });
 
   router.post("/chat/reset", (_req, res) => {
