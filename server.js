@@ -1,4 +1,4 @@
-require('dotenv').config(); // Charge le fichier .env
+require('dotenv').config(); // Charge le fichier .env en local
 const express = require('express');
 const fs = require('fs').promises;
 const path = require('path');
@@ -40,7 +40,7 @@ app.post('/api/chat', async (req, res) => {
             headers: {
                 "Authorization": `Bearer ${OPENROUTER_KEY}`,
                 "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost:3000",
+                "HTTP-Referer": "https://mon-agent-propre.onrender.com", // Mise à jour avec votre URL Render
                 "X-Title": "Mon Agent IDE"
             },
             body: JSON.stringify({
@@ -65,5 +65,8 @@ app.post('/api/appliquer', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Serveur sécurisé lancé sur http://localhost:${PORT}`));
+// Configuration du port et de l'écoute pour le Cloud
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Serveur actif sur le port ${PORT}`);
+});
