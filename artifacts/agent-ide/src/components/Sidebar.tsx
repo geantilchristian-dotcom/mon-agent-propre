@@ -97,25 +97,40 @@ export function Sidebar({ connected, onConnect, onDisconnect, repo, currentPath,
       {/* Connected repo banner */}
       <div
         style={{
-          padding: "6px 10px",
+          padding: "8px 10px",
           borderBottom: "1px solid #21262d",
           background: "#0d1117",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
         }}
       >
-        <Github style={{ width: 11, height: 11, color: "#3fb950", flexShrink: 0 }} />
-        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#8b949e", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={repo}>
-          {repoShort}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+          <Github style={{ width: 11, height: 11, color: "#3fb950", flexShrink: 0 }} />
+          <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9d1d9", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={repo}>
+            {repoShort}
+          </span>
+        </div>
         <button
           onClick={onDisconnect}
-          title="Changer de dépôt"
-          className="flex items-center justify-center rounded hover:bg-white/5 transition-colors"
-          style={{ width: 18, height: 18, color: "#6e7681", flexShrink: 0 }}
+          className="flex items-center gap-1.5 rounded transition-colors w-full"
+          style={{
+            padding: "4px 8px",
+            fontSize: 11,
+            color: "#8b949e",
+            background: "#161b22",
+            border: "1px solid #30363d",
+            cursor: "pointer",
+            justifyContent: "center",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "#58a6ff";
+            e.currentTarget.style.color = "#58a6ff";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "#30363d";
+            e.currentTarget.style.color = "#8b949e";
+          }}
         >
           <LogOut style={{ width: 11, height: 11 }} />
+          Changer de dépôt
         </button>
       </div>
 
