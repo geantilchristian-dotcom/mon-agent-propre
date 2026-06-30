@@ -3,60 +3,77 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mon Agent IA IDE</title>
+    <title>Mon Agent IDE Pro</title>
     <style>
-        /* Design responsive global */
-        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; background: #1e1e1e; color: white; }
+        /* Reset et base */
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, sans-serif; height: 100vh; display: flex; background: #0d1117; color: #c9d1d9; }
+
+        /* Sidebar fichiers */
+        .sidebar { width: 250px; background: #161b22; border-right: 1px solid #30363d; padding: 20px; display: flex; flex-direction: column; }
         
-        /* Conteneur principal (s'adapte à la taille) */
-        .main-layout { display: flex; flex: 1; overflow: hidden; padding: 10px; gap: 10px; }
-        
-        /* Simulateur d'écran */
-        .device-container { 
-            flex: 2; border: 8px solid #444; border-radius: 12px; background: white;
-            display: flex; flex-direction: column; transition: width 0.3s ease;
-        }
+        /* Conteneur principal */
+        .main-content { flex: 1; display: flex; flex-direction: column; }
+
+        /* Zone de prévisualisation (le simulateur) */
+        .editor-area { flex: 1; border-bottom: 1px solid #30363d; background: #fff; }
         #sim-frame { width: 100%; height: 100%; border: none; }
 
-        /* Panneau IA */
-        .ai-panel { flex: 1; display: flex; flex-direction: column; gap: 10px; }
-        textarea { flex: 1; background: #2d2d2d; color: #00ff00; padding: 10px; border: none; }
+        /* Zone de Chat */
+        .chat-area { height: 250px; background: #0d1117; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        #messages { flex: 1; overflow-y: auto; font-size: 14px; border: 1px solid #30363d; padding: 10px; }
+        .input-group { display: flex; gap: 10px; }
+        input { flex: 1; padding: 10px; background: #21262d; border: 1px solid #30363d; color: white; }
 
-        /* Media Query : Mobile */
+        /* Responsive Mobile */
         @media (max-width: 768px) {
-            .main-layout { flex-direction: column; }
-            .device-container { height: 300px; }
+            body { flex-direction: column; }
+            .sidebar { width: 100%; height: 100px; }
         }
     </style>
 </head>
 <body>
 
-    <div style="padding: 10px; text-align: center;">
-        <button onclick="setMode('mobile')">📱 Mobile</button>
-        <button onclick="setMode('desktop')">💻 Desktop</button>
+    <div class="sidebar">
+        <h3>Mon Projet</h3>
+        <ul id="file-list" style="list-style: none; padding: 0;">
+            <li>📄 server.js</li>
+            <li>📄 index.html</li>
+            <li>📄 package.json</li>
+        </ul>
     </div>
 
-    <div class="main-layout">
-        <div class="device-container" id="device">
-            <iframe id="sim-frame" src="https://github.com/"></iframe>
+    <div class="main-content">
+        <div class="editor-area">
+            <iframe id="sim-frame" src="about:blank"></iframe>
         </div>
 
-        <div class="ai-panel">
-            <textarea id="chat-input" placeholder="Demandez à l'IA de modifier le code..."></textarea>
-            <button onclick="envoyerAction()" style="padding: 15px; background: #007acc; border: none; color: white;">Envoyer l'ordre</button>
+        <div class="chat-area">
+            <div id="messages"></div>
+            <div class="input-group">
+                <input type="text" id="user-input" placeholder="Demandez une modification à l'agent...">
+                <button onclick="sendMessage()">Envoyer</button>
+            </div>
         </div>
     </div>
 
     <script>
-        function setMode(mode) {
-            const device = document.getElementById('device');
-            device.style.width = (mode === 'mobile') ? '375px' : '100%';
-        }
-        
-        async function envoyerAction() {
-            const msg = document.getElementById('chat-input').value;
-            alert("Envoi à l'IA : " + msg);
-            // Ici, ajouter la logique fetch('/api/chat', ...)
+        // Logique de communication
+        async function sendMessage() {
+            const input = document.getElementById('user-input');
+            const msg = input.value;
+            const messages = document.getElementById('messages');
+            
+            messages.innerHTML += `<div><b>Vous:</b> ${msg}</div>`;
+            
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ message: msg, filename: 'server.js' })
+            });
+            const data = await res.json();
+            messages.innerHTML += `<div><b>Agent:</b> ${data.response}</div>`;
+            input.value = '';
         }
     </script>
 </body>
