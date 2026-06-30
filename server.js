@@ -8,24 +8,45 @@ const app = express();
 app.use(express.json());
 app.use(express.static('public'));
 
-// 1. Initialisation Octokit pour GitHub
-const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-
-// 2. Mémoire de la conversation
+// Stockage dynamique pour la configuration GitHub de l'utilisateur
+let userOctokit = null;
+let currentRepo = null;
 let conversationHistory = [];
 
-// Route de test GitHub
-app.get('/api/test-github', async (req, res) => {
-    try {
-        const { data } = await octokit.rest.users.getAuthenticated();
-        res.json({ success: true, message: `Connecté à GitHub : ${data.login}` });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+// Route : Configuration dynamique de l'agent
+app.post('/api/configurer', (req, res) => {
+    const { token, repo } = req.body;
+    if (!token || !repo) return res.status(400).json({ error: "Token et Repo requis" });
+    
+    userOctokit = new Octokit({ auth: token });
+    currentRepo = repo; // Format attendu: "proprietaire/nom-du-repo"
+    
+    res.json({ success: true, message: `Connecté avec succès au dépôt : ${repo}` });
 });
 
-// Route 3 : Discussion IA avec Mémoire
+// Route : Lecture automatique de fichier depuis GitHub
+async function lireFichierGitHub(pathToFile) {
+    if (!userOctokit || !currentRepo) return "Agent non configuré.";
+    try {
+        const [owner, repo] = currentRepo.split('/');
+        const { data } = await userOctokit.rest.repos.getContent({
+            owner, repo, path: pathToFile,
+        });
+        return Buffer.from(data.content, 'base64').toString('utf8');
+    } catch (e) { return `Erreur lecture GitHub : ${e.message}`; }
+}
+
+// Route : Discussion IA avec Mémoire
 app.post('/api/chat', async (req, res) => {
     const { message, filename } = req.body;
-    conversationHistory.push({ role: "user", content: `Fichier: ${filename}. Instruction: ${message}` });
+    
+    // Récupération automatique du contenu si un fichier est fourni
+    const fileContent = filename ? await lireFichierGitHub(filename) : "Aucun fichier spécifié.";
+    
+    conversationHistory.push({ 
+        role: "user", 
+        content: `Contexte du fichier ${filename}:\n${fileContent}\n\nInstruction: ${message}` 
+    });
 
     try {
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -41,6 +62,7 @@ app.post('/api/chat', async (req, res) => {
                 "messages": conversationHistory
             })
         });
+        
         const data = await response.json();
         const aiResponse = data.choices[0].message.content;
         
@@ -49,18 +71,10 @@ app.post('/api/chat', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Route 4 : Application du code et Reset Mémoire
-app.post('/api/appliquer', async (req, res) => {
-    const { filename, code } = req.body;
-    try {
-        await fs.writeFile(filename, code);
-        res.json({ success: true, message: "Fichier mis à jour." });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
+// Route : Reset Mémoire
 app.post('/api/reset', (req, res) => {
     conversationHistory = [];
-    res.json({ success: true, message: "Mémoire IA réinitialisée." });
+    res.json({ success: true, message: "Mémoire réinitialisée." });
 });
 
 const PORT = process.env.PORT || 10000;
