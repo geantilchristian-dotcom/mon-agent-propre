@@ -16,9 +16,11 @@ services:
           value: 3000
         - key: BASE_PATH
           value: /
-        - key: OPENROUTER_KEY
+        - key: GROQ_API_KEY
           sync: false
         - key: GEMINI_API_KEY
+          sync: false
+        - key: OPENROUTER_KEY
           sync: false
         - key: SESSION_SECRET
           generateValue: true
