@@ -4,7 +4,8 @@ services:
     runtime: node
     plan: free
     buildCommand: >-
-      npm install -g pnpm --ignore-scripts &&
+      curl -fsSL https://get.pnpm.io/install.sh | SHELL=bash bash - &&
+      export PATH="$HOME/.local/share/pnpm:$PATH" &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @workspace/agent-ide run build &&
       pnpm --filter @workspace/api-server run build
