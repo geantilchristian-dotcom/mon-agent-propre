@@ -166,31 +166,48 @@ async function callGroq(
   apiKey: string,
   messages: OAIMsg[],
   image?: ImageCtx
-): Promise<{ ok: true; text: string } | { ok: false; err: string }> {
-  const model = image ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
+): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
+  const visionModel = "llama-3.2-11b-vision-preview";
+  const textModels = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+  ];
 
-  const groqMessages = messages.map((m, i) => {
+  const buildMessages = (model: string) => messages.map((m, i) => {
     if (image && m.role === "user" && i === messages.findIndex((x) => x.role === "user")) {
-      const content: GroqContent = [
-        { type: "text", text: m.content },
-        { type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}` } },
-      ];
-      return { role: m.role, content };
+      if (model === visionModel) {
+        const content: GroqContent = [
+          { type: "text", text: m.content },
+          { type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}` } },
+        ];
+        return { role: m.role, content };
+      }
     }
     return m;
   });
 
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages: groqMessages, max_tokens: 8192, temperature: 0.2 }),
-  });
-  if (!res.ok) {
+  const modelsToTry = image ? [visionModel, ...textModels] : textModels;
+  const lastErrors: string[] = [];
+
+  for (const model of modelsToTry) {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, messages: buildMessages(model), max_tokens: 8192, temperature: 0.2 }),
+    });
+    if (res.ok) {
+      const d = (await res.json()) as { choices: { message: { content: string } }[] };
+      return { ok: true, text: d.choices[0]?.message?.content ?? "", model };
+    }
     const body = await res.text().catch(() => "");
-    return { ok: false, err: `Groq ${res.status}: ${body.slice(0, 200)}` };
+    lastErrors.push(`${model} ${res.status}: ${body.slice(0, 100)}`);
+    // Only retry on 429 (rate limit) — stop on auth errors
+    if (res.status !== 429) break;
   }
-  const d = (await res.json()) as { choices: { message: { content: string } }[] };
-  return { ok: true, text: d.choices[0]?.message?.content ?? "" };
+
+  return { ok: false, err: `Groq: ${lastErrors.join(" → ")}` };
 }
 
 async function callGemini(
@@ -198,32 +215,43 @@ async function callGemini(
   systemPrompt: string,
   userMessage: string,
   image?: ImageCtx
-): Promise<{ ok: true; text: string } | { ok: false; err: string }> {
+): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
+  const geminiModels = [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+  ];
+
   const userParts: object[] = [{ text: userMessage }];
   if (image) {
     userParts.push({ inlineData: { mimeType: image.mime, data: image.base64 } });
   }
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: userParts }],
-        generationConfig: { maxOutputTokens: 8192, temperature: 0.2 },
-      }),
+  const lastErrors: string[] = [];
+
+  for (const model of geminiModels) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: "user", parts: userParts }],
+          generationConfig: { maxOutputTokens: 8192, temperature: 0.2 },
+        }),
+      }
+    );
+    if (res.ok) {
+      const d = (await res.json()) as { candidates: { content: { parts: { text: string }[] } }[] };
+      return { ok: true, text: d.candidates[0]?.content?.parts?.[0]?.text ?? "", model };
     }
-  );
-  if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return { ok: false, err: `Gemini ${res.status}: ${body.slice(0, 200)}` };
+    lastErrors.push(`${model} ${res.status}: ${body.slice(0, 100)}`);
+    if (res.status !== 429) break;
   }
-  const d = (await res.json()) as {
-    candidates: { content: { parts: { text: string }[] } }[];
-  };
-  return { ok: true, text: d.candidates[0]?.content?.parts?.[0]?.text ?? "" };
+
+  return { ok: false, err: `Gemini: ${lastErrors.join(" → ")}` };
 }
 
 async function callClaude(
@@ -282,8 +310,8 @@ async function callLLM(
   const tryGroq = async () => {
     if (!groqKey) return null;
     const r = await callGroq(groqKey, messages, image);
-    if (r.ok) return { text: r.text, model: image ? "Groq · Llama 3.2 Vision" : "Groq · Llama 3.3 70B" };
-    errors.push(`Groq: ${r.err}`);
+    if (r.ok) return { text: r.text, model: `Groq · ${r.model}` };
+    errors.push(r.err);
     return null;
   };
 
@@ -300,8 +328,8 @@ async function callLLM(
     const sys = messages.find((m) => m.role === "system")?.content ?? "";
     const user = messages.filter((m) => m.role !== "system").map((m) => m.content).join("\n\n");
     const r = await callGemini(geminiKey, sys, user, image);
-    if (r.ok) return { text: r.text, model: "Gemini 2.0 Flash" };
-    errors.push(`Gemini: ${r.err}`);
+    if (r.ok) return { text: r.text, model: `Gemini · ${r.model}` };
+    errors.push(r.err);
     return null;
   };
 
