@@ -5,15 +5,21 @@
     <title>Agent IDE Pro</title>
     <style>
         :root { --bg: #1e1e1e; --sidebar: #252526; --accent: #007acc; --border: #333; }
-        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #fff; font-family: sans-serif; }
+        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #fff; font-family: 'Segoe UI', sans-serif; }
+        
         .sidebar { width: 260px; background: var(--sidebar); border-right: 1px solid var(--border); padding: 15px; display: flex; flex-direction: column; gap: 10px; }
         .main { flex: 1; display: flex; flex-direction: column; }
-        #editor { flex: 1; padding: 20px; background: #000; color: #00ff00; font-family: monospace; overflow: auto; white-space: pre-wrap; }
-        .chat-zone { height: 200px; border-top: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 5px; }
-        input, textarea { background: #3c3c3c; border: 1px solid var(--border); color: white; padding: 8px; border-radius: 4px; }
-        button { background: var(--accent); color: white; border: none; padding: 8px; cursor: pointer; border-radius: 4px; }
+        
+        /* Éditeur sobre (plus de vert) */
+        #editor { flex: 1; padding: 20px; background: #000; color: #e0e0e0; font-family: 'Consolas', monospace; overflow: auto; white-space: pre-wrap; font-size: 14px; }
+        
+        .chat-zone { height: 200px; border-top: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 5px; background: #252526; }
+        
+        input { background: #3c3c3c; border: 1px solid var(--border); color: white; padding: 8px; border-radius: 4px; }
+        button { background: var(--accent); color: white; border: none; padding: 8px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        
         ul { list-style: none; padding: 0; }
-        li { cursor: pointer; padding: 5px 0; color: #ccc; }
+        li { cursor: pointer; padding: 6px 0; color: #ccc; border-bottom: 1px solid #333; }
         li:hover { color: white; }
     </style>
 </head>
@@ -23,8 +29,8 @@
     <strong>Configuration</strong>
     <input id="token" placeholder="GitHub Token">
     <input id="repo" placeholder="Utilisateur/Repo">
-    <button onclick="connecter()">Connexion Dépôt</button>
-    <hr style="width:100%">
+    <button onclick="connecter()">Connecter l'Agent</button>
+    <hr style="width:100%; border:0; border-top:1px solid #444">
     <strong>Explorateur</strong>
     <ul id="file-list"></ul>
 </div>
@@ -32,7 +38,7 @@
 <div class="main">
     <div id="editor">Sélectionnez un projet pour commencer...</div>
     <div class="chat-zone">
-        <div id="messages" style="flex:1; overflow-y:auto; font-size: 12px;"></div>
+        <div id="messages" style="flex:1; overflow-y:auto; font-size: 13px;"></div>
         <div style="display:flex; gap:10px;">
             <input id="user-msg" style="flex:1" placeholder="Demandez une modification...">
             <button onclick="envoyer()">Envoyer</button>
@@ -44,6 +50,7 @@
     async function connecter() {
         const token = document.getElementById('token').value;
         const repo = document.getElementById('repo').value;
+        
         const res = await fetch('/api/configurer', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -52,11 +59,13 @@
         const data = await res.json();
         alert(data.message);
         
-        // Charger la liste des fichiers après connexion
         const filesRes = await fetch('/api/fichiers');
         const files = await filesRes.json();
+        
         document.getElementById('file-list').innerHTML = files.map(f => 
-            `<li onclick="lireFichier('${f.path}')">📄 ${f.name}</li>`
+            f.type === 'file' 
+            ? `<li onclick="lireFichier('${f.path}')">📄 ${f.name}</li>`
+            : `<li>📁 ${f.name}</li>`
         ).join('');
     }
 
