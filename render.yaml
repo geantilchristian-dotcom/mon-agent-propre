@@ -18,6 +18,10 @@ services:
           value: /
         - key: OPENROUTER_KEY
           sync: false
+        - key: GEMINI_API_KEY
+          sync: false
         - key: SESSION_SECRET
           generateValue: true
+        - key: DATABASE_URL
+          sync: false
   
