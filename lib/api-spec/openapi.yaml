@@ -1,0 +1,280 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: github
+    description: GitHub repository operations
+  - name: chat
+    description: AI chat operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /github/configure:
+    post:
+      operationId: configureGithub
+      tags: [github]
+      summary: Configure GitHub session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubConfig"
+      responses:
+        "200":
+          description: Session configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Bad request
+
+  /github/files:
+    get:
+      operationId: listGithubFiles
+      tags: [github]
+      summary: List files in the repo root or a directory
+      parameters:
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GithubFileEntry"
+        "400":
+          description: Not configured
+
+  /github/read:
+    get:
+      operationId: readGithubFile
+      tags: [github]
+      summary: Read a file from GitHub
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GithubFileContent"
+        "400":
+          description: Not configured
+
+  /github/write:
+    post:
+      operationId: writeGithubFile
+      tags: [github]
+      summary: Write/update or create a file on GitHub. If sha is omitted, a new file is created.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubFileWrite"
+      responses:
+        "200":
+          description: File saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Not configured
+
+  /github/delete:
+    post:
+      operationId: deleteGithubFile
+      tags: [github]
+      summary: Delete a file from GitHub
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GithubFileDelete"
+      responses:
+        "200":
+          description: File deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: Not configured
+
+  /chat/message:
+    post:
+      operationId: sendChatMessage
+      tags: [chat]
+      summary: Send a message to the AI with optional file context and image
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatInput"
+      responses:
+        "200":
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "500":
+          description: AI error
+
+  /chat/reset:
+    post:
+      operationId: resetChat
+      tags: [chat]
+      summary: Reset chat history
+      responses:
+        "200":
+          description: Chat reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required:
+        - success
+
+    GithubConfig:
+      type: object
+      properties:
+        token:
+          type: string
+        repo:
+          type: string
+      required:
+        - token
+        - repo
+
+    GithubFileEntry:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+        size:
+          type: ["integer", "null"]
+      required:
+        - name
+        - path
+        - type
+
+    GithubFileContent:
+      type: object
+      properties:
+        type:
+          type: string
+        content:
+          type: ["string", "null"]
+        sha:
+          type: ["string", "null"]
+      required:
+        - type
+
+    GithubFileWrite:
+      type: object
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        sha:
+          type: ["string", "null"]
+        message:
+          type: ["string", "null"]
+      required:
+        - path
+        - content
+
+    GithubFileDelete:
+      type: object
+      properties:
+        path:
+          type: string
+        sha:
+          type: string
+        message:
+          type: ["string", "null"]
+      required:
+        - path
+        - sha
+
+    ChatInput:
+      type: object
+      properties:
+        message:
+          type: string
+        fileContent:
+          type: ["string", "null"]
+        fileName:
+          type: ["string", "null"]
+        imageBase64:
+          type: ["string", "null"]
+        imageMime:
+          type: ["string", "null"]
+      required:
+        - message
+
+    ChatResponse:
+      type: object
+      properties:
+        response:
+          type: string
+      required:
+        - response
