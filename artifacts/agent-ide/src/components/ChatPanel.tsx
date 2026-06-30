@@ -1,4 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import hljs from "highlight.js";
 import { useResetChat } from "@workspace/api-client-react";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -73,10 +76,27 @@ function CopyButton({ text }: { text: string }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Code block — MONO font                                              */
+/*  Code block with syntax highlighting                                 */
 /* ------------------------------------------------------------------ */
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const highlighted = useCallback(() => {
+    if (!lang) return null;
+    try {
+      const result = hljs.highlight(code, { language: lang, ignoreIllegals: true });
+      return result.value;
+    } catch {
+      try {
+        const auto = hljs.highlightAuto(code);
+        return auto.value;
+      } catch {
+        return null;
+      }
+    }
+  }, [lang, code]);
+
+  const html = highlighted();
+
   return (
     <div className="my-2 rounded-lg overflow-hidden border border-white/10">
       <div
@@ -96,7 +116,6 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           fontFamily: MONO,
           fontSize: 12,
           lineHeight: 1.6,
-          color: "#c9d1d9",
           background: "#0d1117",
           padding: "10px 14px",
           margin: 0,
@@ -104,52 +123,120 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           whiteSpace: "pre",
         }}
       >
-        <code>{code}</code>
+        {html ? (
+          <code
+            className={`hljs language-${lang}`}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        ) : (
+          <code style={{ color: "#c9d1d9" }}>{code}</code>
+        )}
       </pre>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Content renderer — markdown-lite                                    */
+/*  Markdown renderer                                                   */
 /* ------------------------------------------------------------------ */
 
-function parseContent(content: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const re = /```(\w*)\n?([\s\S]*?)```/g;
-  let last = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = re.exec(content)) !== null) {
-    const before = content.slice(last, match.index);
-    if (before) {
-      parts.push(
-        <span
-          key={`t-${match.index}`}
-          className="whitespace-pre-wrap"
-          style={{ fontFamily: SANS, fontSize: 13, lineHeight: "1.65" }}
-        >
-          {before}
-        </span>
-      );
-    }
-    parts.push(<CodeBlock key={`c-${match.index}`} lang={match[1] ?? ""} code={match[2] ?? ""} />);
-    last = match.index + match[0].length;
-  }
-
-  const tail = content.slice(last);
-  if (tail) {
-    parts.push(
-      <span
-        key="tail"
-        className="whitespace-pre-wrap"
-        style={{ fontFamily: SANS, fontSize: 13, lineHeight: "1.65" }}
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <div style={{ fontFamily: SANS, fontSize: 13, lineHeight: "1.65", color: "#c9d1d9" }}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          code({ className, children, ...props }) {
+            const match = /language-(\w+)/.exec(className ?? "");
+            const lang = match?.[1] ?? "";
+            const code = String(children).replace(/\n$/, "");
+            const isBlock = code.includes("\n") || lang;
+            if (isBlock) {
+              return <CodeBlock lang={lang} code={code} />;
+            }
+            return (
+              <code
+                style={{
+                  fontFamily: MONO, fontSize: 11.5,
+                  background: "rgba(110,118,129,0.2)",
+                  padding: "1px 5px", borderRadius: 4,
+                  color: "#e06c75",
+                }}
+                {...props}
+              >
+                {children}
+              </code>
+            );
+          },
+          p({ children }) {
+            return <p style={{ margin: "6px 0", lineHeight: 1.65 }}>{children}</p>;
+          },
+          h1({ children }) {
+            return <h1 style={{ fontSize: 16, fontWeight: 700, margin: "12px 0 6px", color: "#e6edf3" }}>{children}</h1>;
+          },
+          h2({ children }) {
+            return <h2 style={{ fontSize: 14, fontWeight: 700, margin: "10px 0 4px", color: "#e6edf3" }}>{children}</h2>;
+          },
+          h3({ children }) {
+            return <h3 style={{ fontSize: 13, fontWeight: 600, margin: "8px 0 4px", color: "#e6edf3" }}>{children}</h3>;
+          },
+          ul({ children }) {
+            return <ul style={{ margin: "4px 0", paddingLeft: 20, listStyleType: "disc" }}>{children}</ul>;
+          },
+          ol({ children }) {
+            return <ol style={{ margin: "4px 0", paddingLeft: 20, listStyleType: "decimal" }}>{children}</ol>;
+          },
+          li({ children }) {
+            return <li style={{ margin: "2px 0" }}>{children}</li>;
+          },
+          blockquote({ children }) {
+            return (
+              <blockquote style={{
+                margin: "6px 0",
+                paddingLeft: 12,
+                borderLeft: "3px solid #30363d",
+                color: "#8b949e",
+              }}>
+                {children}
+              </blockquote>
+            );
+          },
+          a({ href, children }) {
+            return (
+              <a href={href} target="_blank" rel="noopener noreferrer"
+                style={{ color: "#58a6ff", textDecoration: "underline" }}>
+                {children}
+              </a>
+            );
+          },
+          strong({ children }) {
+            return <strong style={{ fontWeight: 600, color: "#e6edf3" }}>{children}</strong>;
+          },
+          em({ children }) {
+            return <em style={{ fontStyle: "italic", color: "#c9d1d9" }}>{children}</em>;
+          },
+          hr() {
+            return <hr style={{ border: "none", borderTop: "1px solid #21262d", margin: "10px 0" }} />;
+          },
+          table({ children }) {
+            return (
+              <div style={{ overflowX: "auto", margin: "8px 0" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>{children}</table>
+              </div>
+            );
+          },
+          th({ children }) {
+            return <th style={{ padding: "4px 10px", borderBottom: "1px solid #30363d", textAlign: "left", color: "#8b949e", fontWeight: 600 }}>{children}</th>;
+          },
+          td({ children }) {
+            return <td style={{ padding: "4px 10px", borderBottom: "1px solid #21262d" }}>{children}</td>;
+          },
+        }}
       >
-        {tail}
-      </span>
-    );
-  }
-  return parts;
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,11 +313,10 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
   return (
     <div className="group w-full max-w-[95%]">
       <div className="rounded-lg rounded-tl-sm overflow-hidden" style={{ background: "#161b22", border: "1px solid #21262d" }}>
-        <div className="px-3 pt-3 pb-2" style={{ color: "#c9d1d9", fontFamily: SANS }}>
-          {parseContent(msg.content)}
+        <div className="px-3 pt-3 pb-2">
+          <MarkdownContent content={msg.content} />
         </div>
 
-        {/* Changed files panel */}
         {hasChanges && (
           <div style={{ borderTop: "1px solid #21262d", background: "#0d1117", padding: "8px 12px" }}>
             <div className="flex items-center gap-2 mb-2">
@@ -268,7 +354,6 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
           </div>
         )}
 
-        {/* Suggestions */}
         {(msg.suggestions?.length ?? 0) > 0 && (
           <div style={{ borderTop: "1px solid #21262d", padding: "8px 12px" }}>
             <SuggestionChips suggestions={msg.suggestions!} onPick={onSuggestion} />
@@ -276,7 +361,6 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
         )}
       </div>
 
-      {/* Model + copy */}
       <div className="flex items-center justify-between mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
         <span className="flex items-center gap-1 pl-1" style={{ fontFamily: MONO, fontSize: 10, color: "#6e7681" }}>
           <Zap className="w-2.5 h-2.5" />
@@ -346,7 +430,6 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelChoice>("auto");
 
-  /* @ mention autocomplete */
   const [fileTree, setFileTree] = useState<string[]>([]);
   const [atQuery, setAtQuery] = useState<string | null>(null);
   const [atDropdownIdx, setAtDropdownIdx] = useState(0);
@@ -358,7 +441,6 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
 
   const resetMutation = useResetChat();
 
-  /* Fetch file tree once when connected */
   useEffect(() => {
     if (!repo) { setFileTree([]); return; }
     fetch("/api/github/files?path=")
@@ -379,7 +461,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           }));
         }
       })
-      .catch(() => {/* ignore */});
+      .catch(() => {});
   }, [repo]);
 
   useEffect(() => {
@@ -411,7 +493,6 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
     if (item) { const f = item.getAsFile(); if (f) handleImageFile(f); }
   }, [handleImageFile]);
 
-  /* @ mention detection */
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInput(val);
@@ -540,7 +621,6 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
 
-          /* Parse JSON — only catch parse errors, let logic errors propagate */
           let ev: SSEEvent;
           try {
             ev = JSON.parse(line.slice(6)) as SSEEvent;
@@ -569,11 +649,9 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
             if (hasChanges && onAgentCommit) onAgentCommit();
             return;
           } else if (ev.type === "error") {
-            /* Throw outside inner catch so it reaches the outer handler */
             throw new Error(ev.message ?? "Erreur agent");
           }
 
-          /* Break out of both loops cleanly when needed */
           if (ev.type === "done" || ev.type === "error") break outer;
         }
       }
@@ -582,7 +660,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
       const msg = e instanceof Error ? e.message : "Erreur de l'agent";
       setStatus("error");
       setTimeout(() => setStatus("idle"), 4000);
-      setMessages(prev => [...prev, { role: "agent", content: `❌ ${msg}`, filesChanged: [] }]);
+      setMessages(prev => [...prev, { role: "agent", content: `❌ **Erreur :** ${msg}`, filesChanged: [] }]);
     } finally {
       setIsPending(false);
       setStreamMsg("");
@@ -607,6 +685,10 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
     });
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Render                                                            */
+  /* ---------------------------------------------------------------- */
+
   return (
     <div className="flex flex-col h-full" style={{ background: "#010409", fontFamily: SANS }}>
 
@@ -630,14 +712,10 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
             disabled={isPending}
             title="Choisir le modèle IA"
             style={{
-              fontFamily: MONO,
-              fontSize: 10,
-              background: "#161b22",
-              border: "1px solid #30363d",
-              borderRadius: 4,
-              color: "#8b949e",
-              padding: "2px 4px",
-              cursor: isPending ? "default" : "pointer",
+              fontFamily: SANS, fontSize: 10.5,
+              background: "#0d1117", color: "#8b949e",
+              border: "1px solid #21262d", borderRadius: 5,
+              padding: "2px 5px", cursor: "pointer",
               outline: "none",
             }}
           >
@@ -649,338 +727,210 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           {/* Reset button */}
           <button
             onClick={handleReset}
-            disabled={resetMutation.isPending || isPending}
             title="Réinitialiser la conversation"
             className="flex items-center justify-center rounded hover:bg-white/5 transition-colors"
-            style={{ width: 22, height: 22, color: "#6e7681" }}
+            style={{ width: 24, height: 24, color: "#6e7681" }}
           >
-            {resetMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+            <RotateCcw className="w-3 h-3" />
           </button>
         </div>
       </div>
 
+      {/* ── Context file badge ── */}
+      {currentPath && (
+        <div
+          className="flex items-center gap-1.5 px-3 shrink-0"
+          style={{ height: 24, background: "#0d1117", borderBottom: "1px solid #21262d" }}
+        >
+          <FileCode style={{ width: 10, height: 10, color: "#61afef", flexShrink: 0 }} />
+          <span style={{ fontFamily: MONO, fontSize: 10.5, color: "#6e7681", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {currentPath}
+          </span>
+        </div>
+      )}
+
       {/* ── Messages ── */}
-      <div className="flex-1 overflow-y-auto" style={{ padding: "12px 10px" }} ref={scrollRef}>
-        {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center" style={{ padding: "0 12px" }}>
-            <Bot className="w-9 h-9 mb-3" style={{ color: "#6e7681", opacity: 0.4 }} />
-            <p style={{ fontFamily: SANS, fontSize: 13, fontWeight: 600, color: "#8b949e", marginBottom: 4 }}>
-              Agent de codage autonome
-            </p>
-            <p style={{ fontFamily: SANS, fontSize: 12, color: "#6e7681", lineHeight: 1.6, marginBottom: 16 }}>
-              Décrivez ce que vous voulez faire. L'agent lit votre projet, applique les changements et les pousse sur GitHub.
-            </p>
-            <div style={{ width: "100%", background: "#161b22", border: "1px solid #21262d", borderRadius: 8, padding: "10px 12px" }}>
-              <p style={{ fontFamily: SANS, fontSize: 10.5, fontWeight: 600, color: "#6e7681", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
-                Exemples
-              </p>
-              {[
-                "Ajoute une page de connexion",
-                "Crée un composant Modal réutilisable",
-                "Corrige l'erreur dans Sidebar.tsx",
-                "Ajoute un bouton dark mode dans le header",
-              ].map((ex) => (
-                <button
-                  key={ex}
-                  onClick={() => { setInput(ex); inputRef.current?.focus(); }}
-                  className="block w-full text-left hover:text-foreground transition-colors"
-                  style={{ fontFamily: SANS, fontSize: 12, color: "#8b949e", padding: "3px 0", cursor: "pointer" }}
-                >
-                  → {ex}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
-                {msg.role === "user" ? (
-                  <div style={{ maxWidth: "88%" }}>
-                    {msg.imageDataUrl && (
-                      <div className="flex justify-end mb-1">
-                        <img
-                          src={msg.imageDataUrl}
-                          alt="screenshot partagé"
-                          style={{
-                            maxWidth: 220, maxHeight: 160, borderRadius: 8,
-                            border: "1px solid #30363d", objectFit: "cover",
-                          }}
-                        />
-                      </div>
-                    )}
-                    <div
-                      style={{
-                        fontFamily: SANS,
-                        fontSize: 13,
-                        lineHeight: 1.6,
-                        fontWeight: 400,
-                        background: "#1f6feb",
-                        color: "#ffffff",
-                        borderRadius: "12px 12px 2px 12px",
-                        padding: "8px 12px",
-                        whiteSpace: "pre-wrap",
-                      }}
-                    >
-                      {msg.content}
-                    </div>
-                    {msg.contextFile && (
-                      <div
-                        className="flex items-center justify-end mt-0.5 gap-1"
-                        style={{ fontFamily: MONO, fontSize: 10, color: "#6e7681" }}
-                      >
-                        <FileCode className="w-3 h-3" />
-                        {msg.contextFile}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <AgentResultCard
-                    msg={msg}
-                    onSuggestion={(s) => { setInput(s); inputRef.current?.focus(); }}
-                  />
-                )}
-              </div>
-            ))}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+        {messages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-10">
+            <Bot className="w-8 h-8" style={{ color: "#3d444d" }} />
+            <span style={{ fontFamily: SANS, fontSize: 12, color: "#6e7681", lineHeight: 1.5 }}>
+              {repo
+                ? "Posez une question ou demandez\nune modification sur votre projet."
+                : "Connectez un dépôt GitHub pour\ncommencer à coder avec l'agent."}
+            </span>
           </div>
         )}
 
-        {/* Thinking indicator */}
+        {messages.map((msg, i) =>
+          msg.role === "user" ? (
+            <div key={i} className="flex justify-end">
+              <div
+                className="max-w-[85%] rounded-lg rounded-br-sm px-3 py-2"
+                style={{ background: "#1f6feb", fontFamily: SANS, fontSize: 13, color: "#ffffff", lineHeight: 1.5 }}
+              >
+                {msg.imageDataUrl && (
+                  <img src={msg.imageDataUrl} alt="shared" className="rounded mb-1.5 max-w-full max-h-32 object-contain" />
+                )}
+                {msg.contextFile && (
+                  <div className="flex items-center gap-1 mb-1" style={{ fontSize: 10.5, opacity: 0.75, fontFamily: MONO }}>
+                    <FileCode style={{ width: 9, height: 9 }} />
+                    {msg.contextFile}
+                  </div>
+                )}
+                <span className="whitespace-pre-wrap">{msg.content}</span>
+              </div>
+            </div>
+          ) : (
+            <AgentResultCard key={i} msg={msg} onSuggestion={(s) => { setInput(s); inputRef.current?.focus(); }} />
+          )
+        )}
+
+        {/* Live status */}
         {isPending && (
-          <div className="flex items-start mt-4">
+          <div className="flex items-start gap-2">
             <div
-              style={{
-                background: "#161b22",
-                border: "1px solid #21262d",
-                borderRadius: "2px 12px 12px 12px",
-                padding: "10px 14px",
-                maxWidth: "90%",
-              }}
+              className="w-full max-w-[95%] rounded-lg rounded-tl-sm px-3 py-2.5"
+              style={{ background: "#161b22", border: "1px solid #21262d" }}
             >
-              <div className="flex items-center gap-2">
-                <Loader2 className="w-3 h-3 animate-spin shrink-0" style={{ color: STATUS_COLORS[status] }} />
-                <span style={{ fontFamily: SANS, fontSize: 12, color: streamMsg ? "#c9d1d9" : STATUS_COLORS[status] }}>
-                  {streamMsg || STATUS_LABELS[status]}
+              <div className="flex items-center gap-2 mb-1">
+                <Loader2 className="w-3 h-3 animate-spin" style={{ color: STATUS_COLORS[status] }} />
+                <span style={{ fontFamily: MONO, fontSize: 10, color: STATUS_COLORS[status], fontWeight: 600 }}>
+                  {STATUS_LABELS[status]}
                 </span>
               </div>
+              {streamMsg && (
+                <span style={{ fontFamily: SANS, fontSize: 11.5, color: "#6e7681", display: "block" }}>
+                  {streamMsg}
+                </span>
+              )}
             </div>
           </div>
         )}
       </div>
 
+      {/* ── Status bar ── */}
+      <div
+        className="shrink-0 flex items-center px-3"
+        style={{ height: 20, borderTop: "1px solid #21262d", background: "#0d1117" }}
+      >
+        <span style={{ fontFamily: MONO, fontSize: 9.5, color: STATUS_COLORS[status] }}>
+          ● {STATUS_LABELS[status]}
+        </span>
+      </div>
+
       {/* ── Input area ── */}
-      <div style={{ padding: "10px 10px 8px", borderTop: "1px solid #21262d" }}>
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          style={{ display: "none" }}
-          onChange={e => { const f = e.target.files?.[0]; if (f) handleImageFile(f); e.target.value = ""; }}
-        />
-
-        {currentPath && (
-          <div
-            className="flex items-center gap-1.5 mb-2 w-fit"
-            style={{
-              fontFamily: MONO,
-              fontSize: 10.5,
-              color: "#61afef",
-              background: "rgba(97,175,239,0.08)",
-              border: "1px solid rgba(97,175,239,0.2)",
-              borderRadius: 4,
-              padding: "2px 8px",
-            }}
-          >
-            <FileCode className="w-3 h-3" />
-            {currentPath.split("/").pop()}
-          </div>
-        )}
-
-        {/* Image preview strip */}
+      <div
+        className="shrink-0"
+        style={{ borderTop: "1px solid #21262d", padding: "8px 10px 10px", background: "#010409" }}
+      >
         {imageDataUrl && (
-          <div className="flex items-center gap-2 mb-2">
-            <div style={{ position: "relative", display: "inline-flex" }}>
-              <img
-                src={imageDataUrl}
-                alt="prévisualisation"
-                style={{
-                  height: 52, maxWidth: 80, borderRadius: 6,
-                  border: "1px solid #30363d", objectFit: "cover",
-                }}
-              />
-              <button
-                onClick={() => setImageDataUrl(null)}
-                style={{
-                  position: "absolute", top: -6, right: -6,
-                  width: 16, height: 16, borderRadius: "50%",
-                  background: "#21262d", border: "1px solid #30363d",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  cursor: "pointer", color: "#8b949e",
-                }}
-              >
-                <X style={{ width: 9, height: 9 }} />
-              </button>
-            </div>
-            <span style={{ fontFamily: SANS, fontSize: 11, color: "#6e7681" }}>
-              Image prête à envoyer
-            </span>
+          <div className="relative inline-block mb-2">
+            <img src={imageDataUrl} alt="preview" className="h-12 rounded border border-white/10 object-contain" />
+            <button
+              onClick={() => setImageDataUrl(null)}
+              className="absolute -top-1 -right-1 rounded-full flex items-center justify-center"
+              style={{ width: 14, height: 14, background: "#f85149", color: "white" }}
+            >
+              <X style={{ width: 8, height: 8 }} />
+            </button>
           </div>
         )}
 
         {/* @ mention dropdown */}
-        {atQuery !== null && atSuggestions.length > 0 && (
+        {atSuggestions.length > 0 && (
           <div
-            style={{
-              background: "#161b22",
-              border: "1px solid #30363d",
-              borderRadius: 6,
-              marginBottom: 4,
-              overflow: "hidden",
-              maxHeight: 180,
-              overflowY: "auto",
-            }}
+            className="mb-1 rounded-md overflow-hidden border border-white/10"
+            style={{ background: "#161b22", maxHeight: 140, overflowY: "auto" }}
           >
             {atSuggestions.map((f, idx) => (
-              <button
+              <div
                 key={f}
-                onMouseDown={(e) => { e.preventDefault(); insertAtMention(f); }}
+                onClick={() => insertAtMention(f)}
                 style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "5px 10px",
-                  fontFamily: MONO,
-                  fontSize: 11,
-                  color: idx === atDropdownIdx ? "#c9d1d9" : "#8b949e",
-                  background: idx === atDropdownIdx ? "rgba(97,175,239,0.1)" : "transparent",
-                  cursor: "pointer",
-                  border: "none",
+                  padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: MONO,
+                  background: idx === atDropdownIdx ? "rgba(97,175,239,0.12)" : "transparent",
+                  color: "#c9d1d9",
                 }}
-                onMouseEnter={() => setAtDropdownIdx(idx)}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(97,175,239,0.08)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = idx === atDropdownIdx ? "rgba(97,175,239,0.12)" : "transparent")}
               >
                 {f}
-              </button>
+              </div>
             ))}
           </div>
         )}
 
-        <div style={{ position: "relative" }}>
-          <Textarea
-            ref={inputRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={e => {
-              if (atQuery !== null && atSuggestions.length > 0) {
-                if (e.key === "ArrowDown") { e.preventDefault(); setAtDropdownIdx(i => Math.min(i + 1, atSuggestions.length - 1)); return; }
-                if (e.key === "ArrowUp") { e.preventDefault(); setAtDropdownIdx(i => Math.max(i - 1, 0)); return; }
-                if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); insertAtMention(atSuggestions[atDropdownIdx] ?? ""); return; }
-                if (e.key === "Escape") { setAtQuery(null); return; }
-              }
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-            }}
-            onPaste={handlePaste}
-            placeholder={imageDataUrl ? "Décrivez le problème ou envoyez directement…" : "Décrivez ce que vous voulez faire… (@ pour mentionner un fichier)"}
-            disabled={isPending}
-            data-testid="input-chat-message"
-            style={{
-              fontFamily: SANS,
-              fontSize: 13,
-              lineHeight: 1.6,
-              background: "#161b22",
-              border: "1px solid #30363d",
-              borderRadius: 8,
-              color: "#c9d1d9",
-              resize: "none",
-              minHeight: 42,
-              maxHeight: 160,
-              padding: "9px 64px 9px 12px",
-              width: "100%",
-              outline: "none",
-            }}
-            className="focus-visible:ring-0 focus-visible:outline-none"
-          />
+        <div className="flex gap-1.5 items-end">
+          <div className="relative flex-1">
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={handleInputChange}
+              onPaste={handlePaste}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                if (e.key === "Escape") setAtQuery(null);
+                if (atSuggestions.length > 0) {
+                  if (e.key === "ArrowDown") { e.preventDefault(); setAtDropdownIdx(i => Math.min(i + 1, atSuggestions.length - 1)); }
+                  if (e.key === "ArrowUp") { e.preventDefault(); setAtDropdownIdx(i => Math.max(i - 1, 0)); }
+                  if (e.key === "Tab") { e.preventDefault(); insertAtMention(atSuggestions[atDropdownIdx] ?? ""); }
+                }
+              }}
+              placeholder={repo ? "Message (↵ envoyer, ⇧↵ saut de ligne, @ fichier)" : "Connectez d'abord un dépôt…"}
+              disabled={isPending}
+              rows={1}
+              className="resize-none text-xs leading-relaxed pr-8"
+              style={{
+                fontFamily: SANS, fontSize: 12.5,
+                background: "#0d1117", border: "1px solid #21262d",
+                borderRadius: 8, color: "#c9d1d9",
+                minHeight: 36, maxHeight: 120,
+                padding: "8px 32px 8px 10px",
+              }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Joindre une image"
+              style={{
+                position: "absolute", right: 6, bottom: 7,
+                color: "#6e7681", background: "none", border: "none", cursor: "pointer",
+              }}
+            >
+              <Paperclip style={{ width: 13, height: 13 }} />
+            </button>
+          </div>
+          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f); e.target.value = ""; }} />
 
-          {/* Paperclip button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isPending}
-            title="Joindre une image (ou Ctrl+V pour coller)"
-            style={{
-              position: "absolute", right: 38, bottom: 8,
-              width: 26, height: 26, borderRadius: 6,
-              background: imageDataUrl ? "rgba(97,175,239,0.15)" : "transparent",
-              color: imageDataUrl ? "#61afef" : "#6e7681",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "background 0.15s",
-              cursor: isPending ? "default" : "pointer",
-            }}
-          >
-            <Paperclip style={{ width: 13, height: 13 }} />
-          </button>
-
-          {/* Send / Stop button */}
           {isPending ? (
             <button
               onClick={handleStop}
-              title="Arrêter l'agent"
+              title="Arrêter"
               style={{
-                position: "absolute", right: 8, bottom: 8,
-                width: 26, height: 26, borderRadius: 6,
-                background: "#b91c1c",
-                color: "#fff",
+                width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                background: "#f85149", color: "white", border: "none", cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                transition: "background 0.15s",
-                cursor: "pointer",
               }}
             >
-              <Square style={{ width: 11, height: 11 }} />
+              <Square style={{ width: 12, height: 12 }} />
             </button>
           ) : (
             <button
               onClick={handleSend}
-              disabled={(!input.trim() && !imageDataUrl) || isPending}
-              data-testid="button-send-chat"
+              disabled={!input.trim() && !imageDataUrl}
               style={{
-                position: "absolute", right: 8, bottom: 8,
-                width: 26, height: 26, borderRadius: 6,
-                background: (input.trim() || imageDataUrl) && !isPending ? "#238636" : "#21262d",
-                color: (input.trim() || imageDataUrl) && !isPending ? "#fff" : "#6e7681",
+                width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                background: (!input.trim() && !imageDataUrl) ? "#21262d" : "#238636",
+                color: (!input.trim() && !imageDataUrl) ? "#6e7681" : "white",
+                border: "none", cursor: (!input.trim() && !imageDataUrl) ? "not-allowed" : "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 transition: "background 0.15s",
-                cursor: (input.trim() || imageDataUrl) && !isPending ? "pointer" : "default",
               }}
             >
               <Send style={{ width: 13, height: 13 }} />
             </button>
           )}
         </div>
-
-        <p
-          className="text-center mt-1.5"
-          style={{ fontFamily: SANS, fontSize: 10, color: "#6e7681" }}
-        >
-          L'agent lit, modifie et commit directement sur GitHub
-        </p>
-      </div>
-
-      {/* ── Status bar ── */}
-      <div
-        className="flex items-center gap-2 shrink-0"
-        style={{ height: 24, padding: "0 10px", borderTop: "1px solid #21262d", background: "#0a0e14" }}
-      >
-        <span
-          style={{
-            width: 6, height: 6, borderRadius: "50%",
-            background: STATUS_COLORS[status],
-            flexShrink: 0,
-            boxShadow: isPending ? `0 0 6px ${STATUS_COLORS[status]}` : "none",
-            transition: "background 0.3s, box-shadow 0.3s",
-          }}
-        />
-        <span style={{ fontFamily: SANS, fontSize: 10.5, color: "#6e7681", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {isPending && streamMsg ? streamMsg : STATUS_LABELS[status]}
-        </span>
       </div>
     </div>
   );

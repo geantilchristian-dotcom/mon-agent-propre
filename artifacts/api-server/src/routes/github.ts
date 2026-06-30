@@ -208,6 +208,21 @@ router.get("/github/tree", async (req, res) => {
   }
 });
 
+/** Repo metadata — default branch, etc. */
+router.get("/github/repo-info", async (req, res) => {
+  if (!octokit || !currentOwner || !currentRepo) {
+    res.status(400).json({ error: "Not configured." });
+    return;
+  }
+  try {
+    const { data } = await octokit.rest.repos.get({ owner: currentOwner, repo: currentRepo });
+    res.json({ defaultBranch: data.default_branch, fullName: data.full_name, private: data.private });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    res.status(500).json({ error: msg });
+  }
+});
+
 /** Recent commits on default branch */
 router.get("/github/commits", async (req, res) => {
   if (!octokit || !currentOwner || !currentRepo) {

@@ -4,7 +4,7 @@ import { Editor, EditorHandle } from "@/components/Editor";
 import { ChatPanel } from "@/components/ChatPanel";
 import { FileSearch } from "@/components/FileSearch";
 import { useConfigureGithub } from "@workspace/api-client-react";
-import { GitBranch, Upload, Loader2, X } from "lucide-react";
+import { GitBranch, Upload, Loader2, X, FileCode, Bot, GitFork, Zap } from "lucide-react";
 
 const STORAGE_KEY = "agent-ide-github-config";
 
@@ -22,9 +22,110 @@ function getFileIcon(name: string): { icon: string; color: string } {
   return map[ext] ?? { icon: "·", color: "#8b949e" };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Welcome screen shown when no file is open                          */
+/* ------------------------------------------------------------------ */
+
+function WelcomeScreen({ repo, onSearch }: { repo: string; onSearch: () => void }) {
+  const repoName = repo.split("/")[1] ?? repo;
+  const tips = [
+    { icon: "⌘K", label: "Recherche rapide de fichiers" },
+    { icon: "@", label: "Mentionner un fichier dans le chat" },
+    { icon: "⇧↵", label: "Saut de ligne dans l'agent" },
+    { icon: "⌘S", label: "Pousser le fichier sur GitHub" },
+  ];
+
+  return (
+    <div
+      className="flex-1 flex flex-col items-center justify-center text-center px-8"
+      style={{ background: "#0d1117", color: "#8b949e" }}
+    >
+      <div
+        className="flex items-center justify-center mb-5 rounded-2xl"
+        style={{ width: 56, height: 56, background: "#161b22", border: "1px solid #21262d" }}
+      >
+        <FileCode className="w-7 h-7" style={{ color: "#3d444d" }} />
+      </div>
+
+      <h2 style={{ fontSize: 15, fontWeight: 600, color: "#c9d1d9", marginBottom: 6, fontFamily: "'Inter', sans-serif" }}>
+        {repo ? repoName : "Aucun projet ouvert"}
+      </h2>
+      <p style={{ fontSize: 12.5, color: "#6e7681", marginBottom: 24, lineHeight: 1.6, fontFamily: "'Inter', sans-serif" }}>
+        {repo
+          ? "Sélectionnez un fichier dans l'explorateur\nà gauche pour commencer à éditer."
+          : "Connectez un dépôt GitHub dans\nla sidebar pour commencer."}
+      </p>
+
+      {repo && (
+        <button
+          onClick={onSearch}
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "7px 14px", borderRadius: 8, fontSize: 12,
+            fontFamily: "'Inter', sans-serif", cursor: "pointer",
+            border: "1px solid #30363d", background: "#161b22",
+            color: "#c9d1d9", transition: "border-color 0.15s",
+            marginBottom: 28,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#58a6ff")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#30363d")}
+        >
+          <span>🔍 Rechercher un fichier</span>
+          <kbd style={{ background: "#21262d", border: "1px solid #30363d", borderRadius: 4, padding: "1px 6px", fontSize: 10.5 }}>
+            ⌘K
+          </kbd>
+        </button>
+      )}
+
+      {/* Keyboard shortcuts */}
+      {repo && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, width: "100%", maxWidth: 240 }}>
+          <span style={{ fontSize: 10, color: "#3d444d", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, fontFamily: "'Inter', sans-serif", marginBottom: 2 }}>
+            Raccourcis
+          </span>
+          {tips.map(({ icon, label }) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 11.5, color: "#6e7681", fontFamily: "'Inter', sans-serif" }}>{label}</span>
+              <kbd style={{ background: "#161b22", border: "1px solid #21262d", borderRadius: 4, padding: "1px 6px", fontSize: 10.5, color: "#8b949e", fontFamily: "'JetBrains Mono', monospace" }}>
+                {icon}
+              </kbd>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Agent tip */}
+      {repo && (
+        <div
+          style={{
+            marginTop: 28, padding: "10px 14px", borderRadius: 8,
+            background: "rgba(63,185,80,0.06)", border: "1px solid rgba(63,185,80,0.15)",
+            maxWidth: 240, width: "100%",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <Bot style={{ width: 12, height: 12, color: "#3fb950" }} />
+            <span style={{ fontSize: 10.5, fontWeight: 600, color: "#3fb950", fontFamily: "'Inter', sans-serif" }}>
+              Agent IA actif
+            </span>
+          </div>
+          <p style={{ fontSize: 11, color: "#6e7681", lineHeight: 1.5, fontFamily: "'Inter', sans-serif", margin: 0 }}>
+            Demandez "ajoute une page de contact" et l'agent modifie directement vos fichiers GitHub.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Home                                                                */
+/* ------------------------------------------------------------------ */
+
 export function Home() {
   const [connected, setConnected] = useState(false);
   const [repo, setRepo] = useState("");
+  const [branch, setBranch] = useState("main");
   const [currentPath, setCurrentPath] = useState<string | null>(null);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [appliedCode, setAppliedCode] = useState<string | null>(null);
@@ -40,7 +141,18 @@ export function Home() {
     setTimeout(() => setBanner(null), 3500);
   };
 
-  /* ── Auto-reconnect from localStorage ── */
+  /* Fetch real default branch when connected */
+  const fetchBranch = async () => {
+    try {
+      const r = await fetch("/api/github/repo-info");
+      if (r.ok) {
+        const d = await r.json() as { defaultBranch?: string };
+        if (d.defaultBranch) setBranch(d.defaultBranch);
+      }
+    } catch { /* keep "main" */ }
+  };
+
+  /* Auto-reconnect from localStorage */
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -49,7 +161,13 @@ export function Home() {
         if (token && savedRepo) {
           configureMutation.mutate(
             { data: { token, repo: savedRepo } },
-            { onSuccess: () => { setConnected(true); setRepo(savedRepo); } }
+            {
+              onSuccess: () => {
+                setConnected(true);
+                setRepo(savedRepo);
+                fetchBranch();
+              }
+            }
           );
         }
       }
@@ -57,7 +175,7 @@ export function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Global keyboard shortcuts ── */
+  /* Global keyboard shortcuts */
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -86,6 +204,7 @@ export function Home() {
           saveRecentProject(repoName, token);
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, repo: repoName })); } catch { /* ignore */ }
           showBanner(`Connecté à ${repoName} ✓`, true);
+          fetchBranch();
         },
         onError: () => showBanner("Échec de connexion GitHub", false),
       }
@@ -95,6 +214,7 @@ export function Home() {
   const handleDisconnect = () => {
     setConnected(false);
     setRepo("");
+    setBranch("main");
     setCurrentPath(null);
     setOpenTabs([]);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
@@ -165,7 +285,7 @@ export function Home() {
           style={{ color: "#8b949e", background: "#161b22", padding: "3px 10px", borderRadius: 6, border: "1px solid #30363d" }}
         >
           <GitBranch style={{ width: 11, height: 11, color: "#3fb950" }} />
-          <span>main</span>
+          <span style={{ color: "#3fb950" }}>{branch}</span>
           {repo && (
             <>
               <span style={{ color: "#3d444d", margin: "0 2px" }}>·</span>
@@ -274,10 +394,7 @@ export function Home() {
                     <span
                       onClick={(e) => handleCloseTab(e, tab)}
                       title="Fermer"
-                      style={{
-                        marginLeft: 2, color: "#6e7681",
-                        display: "flex", alignItems: "center",
-                      }}
+                      style={{ marginLeft: 2, color: "#6e7681", display: "flex", alignItems: "center" }}
                     >
                       <X style={{ width: 12, height: 12 }} />
                     </span>
@@ -287,15 +404,19 @@ export function Home() {
             </div>
           )}
 
-          {/* Editor */}
+          {/* Editor or Welcome screen */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <Editor
-              ref={editorRef}
-              currentPath={currentPath}
-              connected={connected}
-              appliedCode={appliedCode}
-              onApplied={() => setAppliedCode(null)}
-            />
+            {currentPath ? (
+              <Editor
+                ref={editorRef}
+                currentPath={currentPath}
+                connected={connected}
+                appliedCode={appliedCode}
+                onApplied={() => setAppliedCode(null)}
+              />
+            ) : (
+              <WelcomeScreen repo={repo} onSearch={() => setShowSearch(true)} />
+            )}
           </div>
         </div>
 
