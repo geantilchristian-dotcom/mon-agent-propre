@@ -209,6 +209,14 @@ export function saveRecentProject(repo: string, token: string) {
   try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(list.slice(0, 6))); } catch { /* ignore */ }
 }
 
+function parseRepo(value: string): string {
+  // Accept full GitHub URLs like https://github.com/owner/repo or just owner/repo
+  const trimmed = value.trim().replace(/\.git$/, "");
+  const match = trimmed.match(/github\.com\/([^/]+\/[^/]+)/);
+  if (match) return match[1] ?? trimmed;
+  return trimmed;
+}
+
 function ConnectionForm({ onConnect, isConnecting }: { onConnect: (t: string, r: string) => void; isConnecting: boolean }) {
   const [ghToken, setGhToken] = useState("");
   const [repo, setRepo] = useState("");
@@ -216,7 +224,8 @@ function ConnectionForm({ onConnect, isConnecting }: { onConnect: (t: string, r:
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (ghToken && repo) onConnect(ghToken, repo);
+    const parsedRepo = parseRepo(repo);
+    if (ghToken && parsedRepo) onConnect(ghToken, parsedRepo);
   };
 
   return (
@@ -290,7 +299,7 @@ function ConnectionForm({ onConnect, isConnecting }: { onConnect: (t: string, r:
             <Input
               id="repo" value={repo}
               onChange={(e) => setRepo(e.target.value)}
-              placeholder="owner/repo"
+              placeholder="owner/repo ou https://github.com/owner/repo"
               className="h-7 text-xs font-mono"
               autoComplete="off"
               data-testid="input-github-repo"
