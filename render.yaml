@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     buildCommand: >-
-      cd ~ && npm install -g pnpm && cd - &&
+      npm install -g pnpm --ignore-scripts &&
       pnpm install --frozen-lockfile &&
       pnpm --filter @workspace/agent-ide run build &&
       pnpm --filter @workspace/api-server run build
