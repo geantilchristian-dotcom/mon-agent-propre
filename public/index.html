@@ -1,19 +1,35 @@
+<!-- public/index.html -->
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Joindre un projet GitHub</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page d'exemple</title>
+  <style>
+    /* Mode clair */
+    .light-mode {
+      background-color: #f0f0f0;
+      color: #000;
+    }
+
+    /* Mode sombre */
+    .dark-mode {
+      background-color: #333;
+      color: #fff;
+    }
+  </style>
 </head>
-<body>
-    <h1>Joindre un projet GitHub</h1>
-    <button id="join-project-button">Joindre un projet</button>
-    <script>
-        document.getElementById('join-project-button').addEventListener('click', function() {
-            // Ici, vous pouvez ajouter la logique pour joindre un projet GitHub
-            // Par exemple, ouvrir une fenêtre pour autoriser l'accès à GitHub
-            window.open('https://github.com/login/oauth/authorize?client_id=VOTRE_CLIENT_ID', '_blank');
-        });
-    </script>
+<body class="light-mode">
+  <button id="theme-toggle">Basculer le thème</button>
+  <!-- Contenu de la page -->
+  <script>
+    const themeToggle = document.getElementById('theme-toggle');
+    const body = document.body;
+
+    themeToggle.addEventListener('click', () => {
+      body.classList.toggle('light-mode');
+      body.classList.toggle('dark-mode');
+    });
+  </script>
 </body>
 </html>
