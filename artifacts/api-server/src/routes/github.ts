@@ -183,4 +183,55 @@ router.post("/github/delete", async (req, res) => {
   }
 });
 
+/** Full flat file tree (for search overlay) */
+router.get("/github/tree", async (req, res) => {
+  if (!octokit || !currentOwner || !currentRepo) {
+    res.status(400).json({ error: "Not configured." });
+    return;
+  }
+  try {
+    const { data: repoData } = await octokit.rest.repos.get({ owner: currentOwner, repo: currentRepo });
+    const { data: tree } = await octokit.rest.git.getTree({
+      owner: currentOwner,
+      repo: currentRepo,
+      tree_sha: repoData.default_branch,
+      recursive: "1",
+    });
+    const files = tree.tree
+      .filter((item) => item.type === "blob" && item.path)
+      .map((item) => item.path!);
+    res.json({ files });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    req.log.error({ err: e }, "GitHub tree error");
+    res.status(500).json({ error: msg });
+  }
+});
+
+/** Recent commits on default branch */
+router.get("/github/commits", async (req, res) => {
+  if (!octokit || !currentOwner || !currentRepo) {
+    res.status(400).json({ error: "Not configured." });
+    return;
+  }
+  try {
+    const { data } = await octokit.rest.repos.listCommits({
+      owner: currentOwner,
+      repo: currentRepo,
+      per_page: 10,
+    });
+    const commits = data.map((c) => ({
+      sha: c.sha,
+      message: c.commit.message.split("\n")[0] ?? "",
+      author: c.commit.author?.name ?? "unknown",
+      date: c.commit.author?.date ?? "",
+      url: c.html_url,
+    }));
+    res.json({ commits });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    res.status(500).json({ error: msg });
+  }
+});
+
 export default router;

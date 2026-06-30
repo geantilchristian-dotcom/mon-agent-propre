@@ -16,6 +16,8 @@ export * from './githubFileDelete';
 export * from './githubFileEntry';
 export * from './githubFileWrite';
 export * from './healthStatus';
+export * from './historyMessage';
+export * from './historyMessageRole';
 export * from './listGithubFilesParams';
 export * from './readGithubFileParams';
 export * from './successResponse';

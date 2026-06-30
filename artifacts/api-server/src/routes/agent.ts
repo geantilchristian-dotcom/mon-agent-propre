@@ -61,6 +61,30 @@ async function readFile(
   } catch { return null; }
 }
 
+/** Truncate large file content to avoid blowing the context window. */
+function truncateContent(content: string, maxChars = 6000): string {
+  if (content.length <= maxChars) return content;
+  const half = Math.floor(maxChars / 2);
+  const truncated = content.length - maxChars;
+  return (
+    content.slice(0, half) +
+    `\n\n... [${truncated} caractères tronqués pour limiter les tokens] ...\n\n` +
+    content.slice(-half)
+  );
+}
+
+/** Compute simple line diff stats between old and new content. */
+function diffStats(oldContent: string | null, newContent: string): { added: number; removed: number; isNew: boolean } {
+  if (!oldContent) return { added: newContent.split("\n").length, removed: 0, isNew: true };
+  const oldLines = oldContent.split("\n");
+  const newLines = newContent.split("\n");
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+  const added = newLines.filter(l => !oldSet.has(l)).length;
+  const removed = oldLines.filter(l => !newSet.has(l)).length;
+  return { added, removed, isNew: false };
+}
+
 async function getHeadSha(
   kit: Octokit,
   owner: string,
@@ -123,19 +147,35 @@ async function batchCommit(
 
 type OAIMsg = { role: "system" | "user" | "assistant"; content: string };
 
+interface ImageCtx { base64: string; mime: string }
+
+type GroqContent =
+  | string
+  | { type: "text"; text: string }[]
+  | ({ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } })[];
+
 async function callGroq(
   apiKey: string,
-  messages: OAIMsg[]
+  messages: OAIMsg[],
+  image?: ImageCtx
 ): Promise<{ ok: true; text: string } | { ok: false; err: string }> {
+  const model = image ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
+
+  const groqMessages = messages.map((m, i) => {
+    if (image && m.role === "user" && i === messages.findIndex((x) => x.role === "user")) {
+      const content: GroqContent = [
+        { type: "text", text: m.content },
+        { type: "image_url", image_url: { url: `data:${image.mime};base64,${image.base64}` } },
+      ];
+      return { role: m.role, content };
+    }
+    return m;
+  });
+
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages,
-      max_tokens: 8192,
-      temperature: 0.2,
-    }),
+    body: JSON.stringify({ model, messages: groqMessages, max_tokens: 8192, temperature: 0.2 }),
   });
   if (!res.ok) return { ok: false, err: `Groq ${res.status}` };
   const d = (await res.json()) as { choices: { message: { content: string } }[] };
@@ -145,8 +185,14 @@ async function callGroq(
 async function callGemini(
   apiKey: string,
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  image?: ImageCtx
 ): Promise<{ ok: true; text: string } | { ok: false; err: string }> {
+  const userParts: object[] = [{ text: userMessage }];
+  if (image) {
+    userParts.push({ inlineData: { mimeType: image.mime, data: image.base64 } });
+  }
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
     {
@@ -154,7 +200,7 @@ async function callGemini(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: userMessage }] }],
+        contents: [{ role: "user", parts: userParts }],
         generationConfig: { maxOutputTokens: 8192, temperature: 0.2 },
       }),
     }
@@ -166,23 +212,96 @@ async function callGemini(
   return { ok: true, text: d.candidates[0]?.content?.parts?.[0]?.text ?? "" };
 }
 
+async function callClaude(
+  apiKey: string,
+  messages: OAIMsg[],
+  image?: ImageCtx
+): Promise<{ ok: true; text: string } | { ok: false; err: string }> {
+  const systemMsg = messages.find((m) => m.role === "system")?.content ?? "";
+  const nonSystem = messages.filter((m) => m.role !== "system");
+
+  const anthropicMessages = nonSystem.map((m, i) => {
+    if (image && m.role === "user" && i === 0) {
+      return {
+        role: m.role,
+        content: [
+          { type: "text", text: m.content },
+          { type: "image", source: { type: "base64", media_type: image.mime, data: image.base64 } },
+        ],
+      };
+    }
+    return { role: m.role, content: m.content };
+  });
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 16000,
+      system: systemMsg,
+      messages: anthropicMessages,
+    }),
+  });
+  if (!res.ok) return { ok: false, err: `Anthropic ${res.status}: ${await res.text()}` };
+  const d = (await res.json()) as { content: { type: string; text: string }[] };
+  return { ok: true, text: d.content.find((c) => c.type === "text")?.text ?? "" };
+}
+
+type PreferredModel = "auto" | "claude" | "groq" | "gemini";
+
 async function callLLM(
   messages: OAIMsg[],
   groqKey?: string,
-  geminiKey?: string
+  geminiKey?: string,
+  image?: ImageCtx,
+  claudeKey?: string,
+  preferred: PreferredModel = "auto"
 ): Promise<{ text: string; model: string }> {
-  if (groqKey) {
-    const r = await callGroq(groqKey, messages);
-    if (r.ok) return { text: r.text, model: "Groq · Llama 3.3 70B" };
-  }
-  if (geminiKey) {
+
+  const tryGroq = async () => {
+    if (!groqKey) return null;
+    const r = await callGroq(groqKey, messages, image);
+    if (r.ok) return { text: r.text, model: image ? "Groq · Llama 3.2 Vision" : "Groq · Llama 3.3 70B" };
+    return null;
+  };
+
+  const tryClaude = async () => {
+    if (!claudeKey) return null;
+    const r = await callClaude(claudeKey, messages, image);
+    if (r.ok) return { text: r.text, model: image ? "Claude 3.5 Sonnet · Vision" : "Claude 3.5 Sonnet" };
+    return null;
+  };
+
+  const tryGemini = async () => {
+    if (!geminiKey) return null;
     const sys = messages.find((m) => m.role === "system")?.content ?? "";
     const user = messages.filter((m) => m.role !== "system").map((m) => m.content).join("\n\n");
-    const r = await callGemini(geminiKey, sys, user);
+    const r = await callGemini(geminiKey, sys, user, image);
     if (r.ok) return { text: r.text, model: "Gemini 2.0 Flash" };
-    throw new Error(r.err);
+    return null;
+  };
+
+  let result: { text: string; model: string } | null = null;
+
+  if (preferred === "claude") {
+    result = await tryClaude() ?? await tryGroq() ?? await tryGemini();
+  } else if (preferred === "groq") {
+    result = await tryGroq() ?? await tryClaude() ?? await tryGemini();
+  } else if (preferred === "gemini") {
+    result = await tryGemini() ?? await tryClaude() ?? await tryGroq();
+  } else {
+    result = await tryClaude() ?? await tryGroq() ?? await tryGemini();
   }
-  throw new Error("Aucune clé IA configurée.");
+
+  if (!result) {
+    throw new Error("Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY ou GEMINI_API_KEY.");
+  }
+  return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -215,11 +334,21 @@ function parseDeletes(text: string): { path: string }[] {
   return [...new Set(deletes.map((d) => d.path))].map((p) => ({ path: p }));
 }
 
+function parseSuggestions(text: string): string[] {
+  const m = text.match(/<suggestions>([\s\S]*?)<\/suggestions>/);
+  if (!m) return [];
+  return m[1]!
+    .split("\n")
+    .map((l) => l.replace(/^→\s*/, "").trim())
+    .filter((l) => l.length > 0);
+}
+
 function cleanResponse(text: string): string {
   return text
     .replace(/<read_file\s+path="[^"]+"\s*\/>/g, "")
     .replace(/<write_file\s+path="[^"]+">([\s\S]*?)<\/write_file>/g, "")
     .replace(/<delete_file\s+path="[^"]+"\s*\/>/g, "")
+    .replace(/<suggestions>[\s\S]*?<\/suggestions>/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
@@ -229,69 +358,105 @@ function cleanResponse(text: string): string {
 /* ------------------------------------------------------------------ */
 
 function buildSystemPrompt(fileTree: string[]): string {
-  return `Tu es un agent de codage autonome expert. Tu es connecté à un dépôt GitHub et tu peux lire, créer, modifier et supprimer des fichiers directement.
+  return `Tu es un agent de développement web expert de niveau senior. Tu as accès direct à un dépôt GitHub et tu peux lire, créer, modifier et supprimer des fichiers. Tu es capable de construire des sites web complets, des applications full-stack, des APIs, des dashboards, et tout autre projet de développement — de zéro ou à partir de l'existant.
 
-## Structure complète du projet
+## Arbre du projet (${fileTree.length} fichiers)
 ${fileTree.map((f) => `  ${f}`).join("\n")}
+
+---
 
 ## Tes outils
 
-Lire un fichier :
+### Lire un fichier (OBLIGATOIRE avant toute modification)
 <read_file path="chemin/vers/fichier.ext" />
 
-Créer ou modifier un fichier (contenu TOUJOURS complet) :
+Tu peux demander plusieurs lectures simultanément :
+<read_file path="src/App.tsx" />
+<read_file path="src/components/Header.tsx" />
+<read_file path="package.json" />
+
+### Créer ou réécrire un fichier (contenu TOUJOURS intégral)
 <write_file path="chemin/vers/fichier.ext">
-CONTENU COMPLET DU FICHIER ICI
+CONTENU COMPLET DU FICHIER — jamais de "...", jamais de troncature
 </write_file>
 
-Supprimer un fichier :
+### Supprimer un fichier
 <delete_file path="chemin/vers/fichier.ext" />
 
-## STRATÉGIE OBLIGATOIRE — Lis AVANT de modifier
+---
 
-### ➕ Ajouter une nouvelle page ou route :
-Tu DOIS lire ces fichiers dans cet ordre :
-1. package.json → pour identifier le routeur utilisé (react-router-dom, wouter, etc.)
-2. Le fichier de routes principal → App.tsx, router.tsx, src/routes.tsx, src/main.tsx (celui qui existe)
-3. Une page existante → pour comprendre la structure du template de page
-4. Le composant de navigation → Header.tsx, Navbar.tsx, Sidebar.tsx, Layout.tsx (celui qui existe)
+## Stratégie par type de tâche
 
-Ensuite SEULEMENT :
-→ CRÉE le nouveau fichier de page (en suivant le même template que les pages existantes)
-→ MODIFIE le routeur (ajoute la nouvelle route)
-→ MODIFIE la navigation (ajoute le lien vers la nouvelle page)
+### 🏗️ Construire un site/app complet depuis zéro
+1. LIS package.json pour connaître le stack (React, Vue, Next.js, Vite, etc.)
+2. PLANIFIE mentalement : liste tous les fichiers à créer/modifier
+3. LIS les fichiers clés existants (App.tsx, main.tsx, index.css, tailwind.config)
+4. CRÉE dans l'ordre : types → utilitaires → composants → pages → routing → config
+5. MODIFIE App.tsx / router pour intégrer les nouvelles pages
+6. MODIFIE la navigation (Header/Sidebar/Navbar) pour les nouveaux liens
+7. VÉRIFIE mentalement la cohérence des imports avant d'écrire
 
-### 🐛 Corriger un bug :
-1. LIS le fichier concerné
-2. LIS les fichiers qui l'importent ou dont il dépend
-3. CORRIGE de façon chirurgicale (minimum de changements)
+### ➕ Ajouter une page ou fonctionnalité
+1. LIS package.json → stack et routeur utilisé
+2. LIS App.tsx ou router.tsx → comprendre la structure de routes
+3. LIS une page existante → copier le template et les imports
+4. LIS la navigation → savoir où ajouter le lien
+5. CRÉE la page, METS À JOUR le routeur ET la navigation en une seule fois
 
-### 🧩 Ajouter un composant :
-1. LIS les composants similaires existants (pour suivre exactement le même style)
-2. LIS l'index des composants si existant (components/index.ts)
-3. CRÉE le composant en suivant le même pattern exact
+### 🎨 Refonte UI / design
+1. LIS index.css ou tailwind.config.js → comprendre le thème
+2. LIS tous les composants concernés
+3. RÉÉCRIS avec le nouveau design, garde la logique intacte
 
-### 🔧 Modifier un style ou thème :
-1. LIS les fichiers CSS/SCSS/tailwind.config existants
-2. LIS les composants concernés
-3. MODIFIE de façon cohérente
+### 🐛 Corriger un bug
+1. LIS le fichier concerné ET ses imports/dépendances directs
+2. ANALYSE la cause racine
+3. CORRIGE de façon chirurgicale en expliquant pourquoi
 
-## Règles ABSOLUES
+### 🔌 Intégrer une API / backend
+1. LIS la structure existante (routes, hooks, types)
+2. CRÉE le service/hook d'appel API
+3. INTÈGRE dans les composants concernés
+4. GÈRE les états loading/error/success
 
-1. **Ne modifie JAMAIS un fichier sans l'avoir lu en premier** — sans exception
-2. **Contenu COMPLET dans write_file** — jamais de "..." ni "reste du code inchangé"
-3. **Cohérence des imports** — si tu crées un fichier, vérifie que tous les imports sont corrects
-4. **Suit les patterns existants** — utilise le même style, les mêmes conventions, les mêmes librairies déjà présentes
-5. **Ne casse pas ce qui marche** — si le fichier a d'autres fonctionnalités, conserve-les toutes
-6. **Réponds en français** — explique clairement ce que tu as fait et pourquoi
-7. **Quand tu as fini de lire**, passe directement aux modifications — ne demande pas de confirmation`;
+### 🧪 Ajouter des tests
+1. LIS les tests existants pour le pattern
+2. CRÉE des tests complets (unit + integration si pertinent)
+
+---
+
+## Règles absolues (violations = échec)
+
+1. **LIS avant d'écrire** — Ne jamais modifier un fichier sans l'avoir lu dans ce tour ou un tour précédent
+2. **Contenu intégral** — write_file = fichier complet, zéro ellipse, zéro "reste inchangé"
+3. **Tous les fichiers impactés** — Si tu touches App.tsx, mets aussi à jour Sidebar.tsx, Header.tsx, etc.
+4. **Imports valides** — Vérifie que chaque import correspond à un fichier qui existe ou que tu vas créer
+5. **Même stack, mêmes conventions** — Respecte les patterns existants (composants, hooks, styles)
+6. **Ne rien casser** — Si tu n'es pas sûr d'un fichier, lis-le d'abord
+7. **Réponses en français** — Explications et commentaires toujours en français
+8. **Code en anglais** — Noms de variables, fonctions, fichiers en anglais
+
+---
+
+## Format de réponse attendu
+
+1. **Explication** (2-4 phrases) : ce que tu vas faire et pourquoi
+2. **Lectures** si nécessaire : utilise read_file
+3. **Modifications** : utilise write_file / delete_file
+4. **Résumé** : liste des fichiers créés/modifiés
+5. **Suggestions** : toujours 3 actions concrètes
+
+<suggestions>
+→ [action courte liée à ce qui vient d'être fait]
+→ [prochaine étape logique]
+→ [amélioration supplémentaire utile]
+</suggestions>`;
 }
 
 /* ------------------------------------------------------------------ */
 /*  Auto-read key architecture files                                    */
 /* ------------------------------------------------------------------ */
 
-/** Priority-ordered list of key architecture files to pre-read. */
 const KEY_ARCH_CANDIDATES = [
   "package.json",
   "src/App.tsx",
@@ -307,7 +472,6 @@ const KEY_ARCH_CANDIDATES = [
   "pages/_app.jsx",
 ];
 
-/** Read up to `maxFiles` key architecture files and return them as context. */
 async function autoReadArchitectureFiles(
   kit: Octokit,
   owner: string,
@@ -323,7 +487,8 @@ async function autoReadArchitectureFiles(
   for (const path of toRead) {
     const f = await readFile(kit, owner, repo, path);
     if (f) {
-      parts.push(`=== ${path} (chargé automatiquement) ===\n\`\`\`\n${f.content}\n\`\`\``);
+      const truncated = truncateContent(f.content);
+      parts.push(`=== ${path} (chargé automatiquement) ===\n\`\`\`\n${truncated}\n\`\`\``);
     }
   }
 
@@ -332,127 +497,241 @@ async function autoReadArchitectureFiles(
 }
 
 /* ------------------------------------------------------------------ */
-/*  Route                                                               */
+/*  Shared agentic loop                                                 */
 /* ------------------------------------------------------------------ */
 
-router.post("/agent/run", async (req, res) => {
+interface AgentRunInput {
+  message: string;
+  currentFile?: string | null;
+  imageBase64?: string | null;
+  imageMime?: string | null;
+  model?: string | null;
+  history?: { role: string; content: string }[];
+}
+
+interface FileDiff {
+  path: string;
+  added: number;
+  removed: number;
+  isNew: boolean;
+  isDeleted: boolean;
+}
+
+interface AgentRunResult {
+  response: string;
+  filesChanged: string[];
+  diffs: FileDiff[];
+  commitSha: string | null;
+  model: string;
+  suggestions: string[];
+}
+
+type ProgressFn = (event: Record<string, unknown>) => void;
+
+async function runAgenticLoop(
+  kit: Octokit,
+  owner: string,
+  repo: string,
+  input: AgentRunInput,
+  keys: { claudeKey?: string; groqKey?: string; geminiKey?: string },
+  onProgress?: ProgressFn
+): Promise<AgentRunResult> {
+  const { message, currentFile, imageBase64, imageMime, history, model } = input;
+  const image: ImageCtx | undefined =
+    imageBase64 && imageMime ? { base64: imageBase64, mime: imageMime } : undefined;
+
+  const preferred = (model ?? "auto") as PreferredModel;
+
+  /* 1. File tree */
+  onProgress?.({ type: "status", message: "📁 Chargement de l'arbre du projet..." });
+  const fileTree: string[] = [];
+  await collectTree(kit, owner, repo, "", fileTree, 300);
+
+  /* 2. Auto-read architecture files */
+  onProgress?.({ type: "status", message: `🔍 Analyse de ${fileTree.length} fichiers...` });
+  const archContext = await autoReadArchitectureFiles(kit, owner, repo, fileTree);
+
+  const systemPrompt = buildSystemPrompt(fileTree);
+
+  /* 3. Build initial user message */
+  let userMsg = message;
+  if (currentFile) userMsg = `Fichier ouvert dans l'éditeur : ${currentFile}\n\n${userMsg}`;
+  if (archContext) userMsg = `${userMsg}${archContext}`;
+
+  /* 4. Message array with conversation history */
+  const msgs: OAIMsg[] = [{ role: "system", content: systemPrompt }];
+  if (history?.length) {
+    for (const h of history.slice(-12)) {
+      msgs.push({ role: h.role as "user" | "assistant", content: h.content });
+    }
+  }
+  msgs.push({ role: "user", content: userMsg });
+
+  /* 5. Agentic loop — up to 8 read→write cycles, 2 retries per turn */
+  const MAX_TURNS = 8;
+  const MAX_RETRIES = 2;
+  const readDone = new Set<string>();
+  const readCache = new Map<string, string>(); // path → old content (for diff)
+  let lastText = "";
+  let modelName = "";
+  let turnCount = 0;
+
+  while (turnCount < MAX_TURNS) {
+    turnCount++;
+    onProgress?.({ type: "turn", turn: turnCount, message: `🧠 Tour ${turnCount}/${MAX_TURNS} — Réflexion en cours...` });
+
+    let turn: { text: string; model: string } | null = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const t = await callLLM(msgs, keys.groqKey, keys.geminiKey, turnCount === 1 ? image : undefined, keys.claudeKey, preferred);
+        if (t.text.trim().length > 50) {
+          turn = t;
+          break;
+        }
+        if (attempt < MAX_RETRIES) {
+          onProgress?.({ type: "status", message: `⚠️ Réponse insuffisante, nouvelle tentative (${attempt + 1}/${MAX_RETRIES})...` });
+          msgs.push({ role: "assistant", content: t.text });
+          msgs.push({ role: "user", content: "Ta réponse était vide ou incomplète. Reprends et effectue les modifications demandées avec write_file." });
+        }
+      } catch (e) {
+        if (attempt === MAX_RETRIES) throw e;
+        onProgress?.({ type: "status", message: `⚠️ Erreur LLM, nouvelle tentative (${attempt + 1}/${MAX_RETRIES})...` });
+      }
+    }
+
+    if (!turn) break;
+    lastText = turn.text;
+    modelName = turn.model;
+
+    const newPaths = parseReadRequests(lastText).filter((p) => !readDone.has(p));
+    if (newPaths.length === 0) break;
+
+    const label = newPaths.slice(0, 3).join(", ") + (newPaths.length > 3 ? `… +${newPaths.length - 3}` : "");
+    onProgress?.({ type: "reading", files: newPaths, message: `📖 Lecture de ${newPaths.length} fichier(s) : ${label}` });
+
+    const fileContents: string[] = [];
+    for (const p of newPaths.slice(0, 15)) {
+      readDone.add(p);
+      const f = await readFile(kit, owner, repo, p);
+      if (f) {
+        readCache.set(p, f.content);
+        const truncated = truncateContent(f.content);
+        fileContents.push(`=== ${p} ===\n\`\`\`\n${truncated}\n\`\`\``);
+      } else {
+        fileContents.push(`=== ${p} ===\n(fichier non trouvé — à créer)`);
+      }
+    }
+
+    msgs.push({ role: "assistant", content: lastText });
+    msgs.push({
+      role: "user",
+      content: `Voici les fichiers demandés (${fileContents.length}) :\n\n${fileContents.join("\n\n")}\n\n---\nEffectue maintenant TOUTES les modifications en une seule réponse. N'oublie aucun fichier impacté.`,
+    });
+  }
+
+  /* 6. Parse writes & deletes */
+  const writes = parseWrites(lastText);
+  const deletes = parseDeletes(lastText);
+  const filesChanged = [...writes.map((w) => w.path), ...deletes.map((d) => d.path)];
+
+  /* 7. Compute diffs using cached old content */
+  const diffs: FileDiff[] = [
+    ...writes.map((w) => {
+      const old = readCache.get(w.path) ?? null;
+      const stats = diffStats(old, w.content);
+      return { path: w.path, ...stats, isDeleted: false };
+    }),
+    ...deletes.map((d) => {
+      const old = readCache.get(d.path);
+      const lines = old ? old.split("\n").length : 0;
+      return { path: d.path, added: 0, removed: lines, isNew: false, isDeleted: true };
+    }),
+  ];
+
+  /* 8. Commit */
+  let commitSha: string | null = null;
+  if (writes.length > 0 || deletes.length > 0) {
+    onProgress?.({ type: "committing", files: filesChanged, message: `✏️ Commit de ${filesChanged.length} fichier(s)...` });
+    const firstLine = cleanResponse(lastText).split("\n")[0]?.slice(0, 72) ?? message.slice(0, 72);
+    commitSha = await batchCommit(kit, owner, repo, writes, deletes,
+      `feat(agent): ${firstLine}\n\n${filesChanged.map((f) => `- ${f}`).join("\n")}`);
+  }
+
+  return {
+    response: cleanResponse(lastText),
+    filesChanged,
+    diffs,
+    commitSha,
+    model: `${modelName} (${turnCount} tour${turnCount > 1 ? "s" : ""})`,
+    suggestions: parseSuggestions(lastText),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helper: parse & validate request body                              */
+/* ------------------------------------------------------------------ */
+
+function parseAgentRequest(body: unknown):
+  | { ok: true; input: AgentRunInput; kit: Octokit; owner: string; repo: string; keys: { claudeKey?: string; groqKey?: string; geminiKey?: string }; error?: never }
+  | { ok: false; error: string; status: number } {
   if (!octokit || !currentOwner || !currentRepo) {
-    res.status(400).json({ error: "Non configuré. Connectez d'abord un dépôt GitHub." });
-    return;
+    return { ok: false, error: "Non configuré. Connectez d'abord un dépôt GitHub.", status: 400 };
   }
+  const parsed = RunAgentBody.safeParse(body);
+  if (!parsed.success) return { ok: false, error: "Corps de requête invalide", status: 400 };
 
-  const parsed = RunAgentBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Corps de requête invalide" });
-    return;
-  }
-
-  const { message, currentFile } = parsed.data;
+  const claudeKey = process.env["ANTHROPIC_API_KEY"];
   const groqKey = process.env["GROQ_API_KEY"];
   const geminiKey = process.env["GEMINI_API_KEY"];
 
-  if (!groqKey && !geminiKey) {
-    res.status(500).json({ error: "Aucune clé IA configurée. Ajoutez GROQ_API_KEY ou GEMINI_API_KEY." });
-    return;
+  if (!claudeKey && !groqKey && !geminiKey) {
+    return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY ou GEMINI_API_KEY.", status: 500 };
   }
 
+  return { ok: true, input: parsed.data, kit: octokit, owner: currentOwner, repo: currentRepo, keys: { claudeKey, groqKey, geminiKey } };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Routes                                                              */
+/* ------------------------------------------------------------------ */
+
+/* JSON route */
+router.post("/agent/run", async (req, res) => {
+  const ctx = parseAgentRequest(req.body);
+  if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
+
   try {
-    const kit = octokit;
-    const owner = currentOwner;
-    const repo = currentRepo;
-
-    /* --- 1. Collect file tree --- */
-    req.log.info({ owner, repo }, "Agent: collecting file tree");
-    const fileTree: string[] = [];
-    await collectTree(kit, owner, repo, "", fileTree, 250);
-
-    /* --- 2. Auto-read key architecture files --- */
-    req.log.info("Agent: auto-reading architecture files");
-    const archContext = await autoReadArchitectureFiles(kit, owner, repo, fileTree);
-
-    const systemPrompt = buildSystemPrompt(fileTree);
-
-    /* --- 3. Build initial user message with context --- */
-    let userMsg = message;
-    if (currentFile) {
-      userMsg = `Fichier actuellement ouvert dans l'éditeur : ${currentFile}\n\n${message}`;
-    }
-
-    if (archContext) {
-      userMsg = `${userMsg}${archContext}`;
-    }
-
-    const messages: OAIMsg[] = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userMsg },
-    ];
-
-    /* --- 4. First LLM call --- */
-    req.log.info({ owner, repo, message }, "Agent: first LLM call");
-    const turn1 = await callLLM(messages, groqKey, geminiKey);
-
-    /* --- 5. Execute additional read_file requests (up to 10 files) --- */
-    const readPaths = parseReadRequests(turn1.text);
-    let turn2Text = turn1.text;
-    let modelName = turn1.model;
-
-    if (readPaths.length > 0) {
-      req.log.info({ paths: readPaths }, "Agent: reading additional files");
-
-      const fileContents: string[] = [];
-      for (const p of readPaths.slice(0, 10)) {
-        const f = await readFile(kit, owner, repo, p);
-        if (f) {
-          fileContents.push(`=== ${p} ===\n\`\`\`\n${f.content}\n\`\`\``);
-        } else {
-          fileContents.push(`=== ${p} ===\n(fichier non trouvé ou vide)`);
-        }
-      }
-
-      messages.push({ role: "assistant", content: turn1.text });
-      messages.push({
-        role: "user",
-        content: `Voici le contenu des fichiers demandés :\n\n${fileContents.join("\n\n")}\n\nMaintenant effectue TOUTES les modifications nécessaires. N'oublie aucun fichier (routes, navigation, nouveau fichier de page, etc.).`,
-      });
-
-      req.log.info("Agent: second LLM call");
-      const turn2 = await callLLM(messages, groqKey, geminiKey);
-      turn2Text = turn2.text;
-      modelName = turn2.model;
-    }
-
-    /* --- 6. Parse file operations --- */
-    const writes = parseWrites(turn2Text);
-    const deletes = parseDeletes(turn2Text);
-    const filesChanged: string[] = [
-      ...writes.map((w) => w.path),
-      ...deletes.map((d) => d.path),
-    ];
-
-    /* --- 7. Batch commit --- */
-    let commitSha: string | null = null;
-    if (writes.length > 0 || deletes.length > 0) {
-      req.log.info(
-        { writes: writes.map((w) => w.path), deletes: deletes.map((d) => d.path) },
-        "Agent: committing changes"
-      );
-      const firstLine = cleanResponse(turn2Text).split("\n")[0]?.slice(0, 72) ?? message.slice(0, 72);
-      const commitMsg = `feat(agent): ${firstLine}\n\n${filesChanged.map((f) => `- ${f}`).join("\n")}`;
-      commitSha = await batchCommit(kit, owner, repo, writes, deletes, commitMsg);
-      req.log.info({ commitSha }, "Agent: commit created");
-    }
-
-    /* --- 8. Return --- */
-    res.json({
-      response: cleanResponse(turn2Text),
-      filesChanged,
-      commitSha,
-      model: modelName,
-    });
+    const result = await runAgenticLoop(ctx.kit, ctx.owner, ctx.repo, ctx.input, ctx.keys);
+    res.json(result);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     req.log.error({ err: e }, "Agent error");
     res.status(500).json({ error: msg });
+  }
+});
+
+/* SSE streaming route */
+router.post("/agent/stream", async (req, res) => {
+  const ctx = parseAgentRequest(req.body);
+  if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+  try {
+    const result = await runAgenticLoop(ctx.kit, ctx.owner, ctx.repo, ctx.input, ctx.keys, send);
+    send({ type: "done", ...result });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    req.log.error({ err: e }, "Agent stream error");
+    send({ type: "error", message: msg });
+  } finally {
+    res.end();
   }
 });
 

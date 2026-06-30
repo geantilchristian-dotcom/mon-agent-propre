@@ -5,9 +5,15 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { HistoryMessage } from './historyMessage';
 
 export interface AgentInput {
   message: string;
   /** @nullable */
   currentFile?: string | null;
+  /** @nullable */
+  imageBase64?: string | null;
+  /** @nullable */
+  imageMime?: string | null;
+  history?: HistoryMessage[];
 }

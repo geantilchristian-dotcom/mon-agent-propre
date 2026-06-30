@@ -13,4 +13,5 @@ export interface AgentResult {
   commitSha?: string | null;
   /** @nullable */
   model?: string | null;
+  suggestions?: string[];
 }

@@ -304,6 +304,18 @@ components:
       required:
         - response
 
+    HistoryMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+      required:
+        - role
+        - content
+
     AgentInput:
       type: object
       properties:
@@ -311,6 +323,17 @@ components:
           type: string
         currentFile:
           type: ["string", "null"]
+        imageBase64:
+          type: ["string", "null"]
+        imageMime:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+          enum: [auto, claude, groq, gemini, null]
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryMessage"
       required:
         - message
 
@@ -327,6 +350,10 @@ components:
           type: ["string", "null"]
         model:
           type: ["string", "null"]
+        suggestions:
+          type: array
+          items:
+            type: string
       required:
         - response
         - filesChanged

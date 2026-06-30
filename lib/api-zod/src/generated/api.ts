@@ -118,14 +118,22 @@ export const ResetChatResponse = zod.object({
  */
 export const RunAgentBody = zod.object({
   "message": zod.string(),
-  "currentFile": zod.string().nullish()
+  "currentFile": zod.string().nullish(),
+  "imageBase64": zod.string().nullish(),
+  "imageMime": zod.string().nullish(),
+  "model": zod.enum(['auto', 'claude', 'groq', 'gemini']).nullish(),
+  "history": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string()
+})).optional()
 })
 
 export const RunAgentResponse = zod.object({
   "response": zod.string(),
   "filesChanged": zod.array(zod.string()),
   "commitSha": zod.string().nullish(),
-  "model": zod.string().nullish()
+  "model": zod.string().nullish(),
+  "suggestions": zod.array(zod.string()).optional()
 })
 
 

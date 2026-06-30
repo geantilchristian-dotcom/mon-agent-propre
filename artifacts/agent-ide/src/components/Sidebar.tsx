@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   useListGithubFiles, getListGithubFilesQueryKey,
   useWriteGithubFile, useDeleteGithubFile,
@@ -7,16 +7,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, ChevronRight, ChevronDown, Github, Plus, Trash2 } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, Github, Plus, Trash2, LogOut } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface SidebarProps {
   connected: boolean;
   onConnect: (token: string, repo: string) => void;
+  onDisconnect: () => void;
+  repo: string;
   currentPath: string | null;
   onSelectFile: (path: string) => void;
   isConnecting: boolean;
   onNotify?: (text: string, ok: boolean) => void;
+  refreshKey?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -52,12 +55,19 @@ function getFileIcon(name: string, isDir = false): { label: string; color: strin
 /*  Sidebar                                                             */
 /* ------------------------------------------------------------------ */
 
-export function Sidebar({ connected, onConnect, currentPath, onSelectFile, isConnecting, onNotify }: SidebarProps) {
+export function Sidebar({ connected, onConnect, onDisconnect, repo, currentPath, onSelectFile, isConnecting, onNotify, refreshKey }: SidebarProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
   const queryClient = useQueryClient();
   const writeMutation = useWriteGithubFile();
   const notify = onNotify ?? (() => {});
+
+  /* Refresh file tree when agent commits files */
+  useEffect(() => {
+    if (refreshKey && refreshKey > 0) {
+      queryClient.invalidateQueries({ queryKey: getListGithubFilesQueryKey() });
+    }
+  }, [refreshKey, queryClient]);
 
   const handleCreateFile = () => {
     if (!newFilePath.trim()) return;
@@ -80,12 +90,39 @@ export function Sidebar({ connected, onConnect, currentPath, onSelectFile, isCon
     return <ConnectionForm onConnect={onConnect} isConnecting={isConnecting} />;
   }
 
+  const repoShort = repo.split("/")[1] ?? repo;
+
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: "#010409" }}>
+      {/* Connected repo banner */}
+      <div
+        style={{
+          padding: "6px 10px",
+          borderBottom: "1px solid #21262d",
+          background: "#0d1117",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <Github style={{ width: 11, height: 11, color: "#3fb950", flexShrink: 0 }} />
+        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#8b949e", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={repo}>
+          {repoShort}
+        </span>
+        <button
+          onClick={onDisconnect}
+          title="Changer de dépôt"
+          className="flex items-center justify-center rounded hover:bg-white/5 transition-colors"
+          style={{ width: 18, height: 18, color: "#6e7681", flexShrink: 0 }}
+        >
+          <LogOut style={{ width: 11, height: 11 }} />
+        </button>
+      </div>
+
       {/* Header */}
       <div
         className="flex items-center justify-between px-3 shrink-0"
-        style={{ height: 36, borderBottom: "1px solid #21262d" }}
+        style={{ height: 32, borderBottom: "1px solid #21262d" }}
       >
         <span
           className="uppercase tracking-wider font-semibold"
@@ -142,9 +179,25 @@ export function Sidebar({ connected, onConnect, currentPath, onSelectFile, isCon
 /*  Connection form                                                     */
 /* ------------------------------------------------------------------ */
 
+const PROJECTS_KEY = "agent-ide-projects";
+
+interface RecentProject { repo: string; token: string; lastUsed: number; }
+
+function getRecentProjects(): RecentProject[] {
+  try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) ?? "[]") as RecentProject[]; }
+  catch { return []; }
+}
+
+export function saveRecentProject(repo: string, token: string) {
+  const list = getRecentProjects().filter((p) => p.repo !== repo);
+  list.unshift({ repo, token, lastUsed: Date.now() });
+  try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(list.slice(0, 6))); } catch { /* ignore */ }
+}
+
 function ConnectionForm({ onConnect, isConnecting }: { onConnect: (t: string, r: string) => void; isConnecting: boolean }) {
   const [ghToken, setGhToken] = useState("");
   const [repo, setRepo] = useState("");
+  const recent = getRecentProjects();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,43 +205,88 @@ function ConnectionForm({ onConnect, isConnecting }: { onConnect: (t: string, r:
   };
 
   return (
-    <div className="p-4 flex flex-col h-full justify-center" style={{ background: "#010409" }}>
-      <div className="mb-5 flex justify-center">
-        <div className="w-11 h-11 rounded-full flex items-center justify-center" style={{ background: "#161b22", border: "1px solid #30363d" }}>
-          <Github className="w-5 h-5" style={{ color: "#8b949e" }} />
+    <div className="flex flex-col h-full overflow-y-auto" style={{ background: "#010409" }}>
+      {/* Recent projects */}
+      {recent.length > 0 && (
+        <div style={{ padding: "12px 12px 0" }}>
+          <p style={{ fontFamily: "sans-serif", fontSize: 10, color: "#6e7681", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 6 }}>
+            Projets récents
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 12 }}>
+            {recent.map((p) => (
+              <button
+                key={p.repo}
+                onClick={() => onConnect(p.token, p.repo)}
+                disabled={isConnecting}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "6px 8px", borderRadius: 6, cursor: "pointer",
+                  background: "#0d1117", border: "1px solid #21262d",
+                  textAlign: "left", width: "100%",
+                  transition: "border-color 0.15s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#30363d")}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#21262d")}
+              >
+                <Github style={{ width: 11, height: 11, color: "#3fb950", flexShrink: 0 }} />
+                <span style={{ fontFamily: "monospace", fontSize: 11, color: "#c9d1d9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {p.repo}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div style={{ borderTop: "1px solid #21262d", marginBottom: 12 }} />
         </div>
-      </div>
-      <h2 className="text-sm font-semibold mb-1 text-center" style={{ color: "#c9d1d9" }}>Connecter un dépôt</h2>
-      <p className="text-xs mb-5 text-center" style={{ color: "#6e7681" }}>Entrez vos identifiants GitHub.</p>
+      )}
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="token" className="text-xs" style={{ color: "#8b949e" }}>Personal Access Token</Label>
-          <Input
-            id="token" type="password" value={ghToken}
-            onChange={(e) => setGhToken(e.target.value)}
-            placeholder="ghp_..."
-            className="h-7 text-xs font-mono"
-            autoComplete="off" data-lpignore="true" data-1p-ignore
-            data-testid="input-github-token"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="repo" className="text-xs" style={{ color: "#8b949e" }}>Dépôt GitHub</Label>
-          <Input
-            id="repo" value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            placeholder="owner/repo"
-            className="h-7 text-xs font-mono"
-            autoComplete="off"
-            data-testid="input-github-repo"
-          />
-        </div>
-        <Button type="submit" className="w-full h-7 text-xs" disabled={!ghToken || !repo || isConnecting} data-testid="button-connect-github">
-          {isConnecting ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" /> : null}
-          Connecter
-        </Button>
-      </form>
+      <div className="p-4 flex flex-col justify-center" style={{ flex: recent.length > 0 ? "unset" : 1 }}>
+        {recent.length === 0 && (
+          <>
+            <div className="mb-5 flex justify-center">
+              <div className="w-11 h-11 rounded-full flex items-center justify-center" style={{ background: "#161b22", border: "1px solid #30363d" }}>
+                <Github className="w-5 h-5" style={{ color: "#8b949e" }} />
+              </div>
+            </div>
+            <h2 className="text-sm font-semibold mb-1 text-center" style={{ color: "#c9d1d9" }}>Connecter un dépôt</h2>
+            <p className="text-xs mb-5 text-center" style={{ color: "#6e7681" }}>Entrez vos identifiants GitHub.</p>
+          </>
+        )}
+
+        {recent.length > 0 && (
+          <p style={{ fontFamily: "sans-serif", fontSize: 10, color: "#6e7681", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginBottom: 8 }}>
+            Nouveau dépôt
+          </p>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="token" className="text-xs" style={{ color: "#8b949e" }}>Personal Access Token</Label>
+            <Input
+              id="token" type="password" value={ghToken}
+              onChange={(e) => setGhToken(e.target.value)}
+              placeholder="ghp_..."
+              className="h-7 text-xs font-mono"
+              autoComplete="off" data-lpignore="true" data-1p-ignore
+              data-testid="input-github-token"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="repo" className="text-xs" style={{ color: "#8b949e" }}>Dépôt GitHub</Label>
+            <Input
+              id="repo" value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+              placeholder="owner/repo"
+              className="h-7 text-xs font-mono"
+              autoComplete="off"
+              data-testid="input-github-repo"
+            />
+          </div>
+          <Button type="submit" className="w-full h-7 text-xs" disabled={!ghToken || !repo || isConnecting} data-testid="button-connect-github">
+            {isConnecting ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" /> : null}
+            Connecter
+          </Button>
+        </form>
+      </div>
     </div>
   );
 }

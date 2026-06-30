@@ -1,9 +1,14 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { useReadGithubFile, getReadGithubFileQueryKey, useWriteGithubFile } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
 import { Loader2, Save, Code } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+export interface EditorHandle {
+  save: () => void;
+  isDirty: boolean;
+  isSaving: boolean;
+}
 
 interface EditorProps {
   currentPath: string | null;
@@ -22,7 +27,10 @@ function getLanguageLabel(path: string): string {
   return map[ext] ?? ext.toUpperCase();
 }
 
-export function Editor({ currentPath, connected, appliedCode, onApplied }: EditorProps) {
+export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
+  { currentPath, connected, appliedCode, onApplied },
+  ref
+) {
   const [content, setContent] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [cursorLine, setCursorLine] = useState(1);
@@ -71,20 +79,26 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
     setCursorCol((lines[lines.length - 1]?.length ?? 0) + 1);
   }, []);
 
-  const handleSave = () => {
-    if (!currentPath || !fileData?.sha) return;
+  const handleSave = useCallback(() => {
+    if (!currentPath || !fileData?.sha || writeMutation.isPending) return;
     writeMutation.mutate(
       { data: { path: currentPath, content, sha: fileData.sha, message: `Update ${currentPath} via Agent IDE` } },
       {
         onSuccess: () => {
           setIsDirty(false);
-          toast({ title: "Sauvegardé", description: currentPath });
+          toast({ title: "Poussé sur GitHub ✓", description: currentPath });
           queryClient.invalidateQueries({ queryKey: getReadGithubFileQueryKey({ path: currentPath }) });
         },
-        onError: () => toast({ title: "Échec de sauvegarde", variant: "destructive" }),
+        onError: () => toast({ title: "Échec du push", variant: "destructive" }),
       }
     );
-  };
+  }, [currentPath, content, fileData?.sha, writeMutation, queryClient, toast]);
+
+  useImperativeHandle(ref, () => ({
+    save: handleSave,
+    get isDirty() { return isDirty; },
+    get isSaving() { return writeMutation.isPending; },
+  }), [handleSave, isDirty, writeMutation.isPending]);
 
   if (!connected) {
     return (
@@ -115,26 +129,6 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Editor toolbar */}
-      <div className="h-9 border-b border-border bg-[#010409] flex items-center justify-between px-3 shrink-0">
-        <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground/60">
-          {isDirty && <span className="w-2 h-2 rounded-full bg-primary shrink-0" title="Non sauvegardé" />}
-        </div>
-        <Button
-          size="sm"
-          variant={isDirty ? "default" : "ghost"}
-          className="h-6 text-[11px] px-2.5"
-          disabled={!isDirty || writeMutation.isPending}
-          onClick={handleSave}
-          data-testid="button-save-file"
-        >
-          {writeMutation.isPending
-            ? <Loader2 className="w-3 h-3 animate-spin mr-1.5" />
-            : <Save className="w-3 h-3 mr-1.5" />}
-          Save
-        </Button>
-      </div>
-
       {/* Code area */}
       <div className="flex-1 overflow-hidden flex bg-[#0d1117]">
         {/* Line numbers */}
@@ -191,8 +185,8 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
         <span>Ln {cursorLine}, Col {cursorCol}</span>
         <div className="flex-1" />
         <span>{lines.length} lignes</span>
-        {isDirty && <span className="text-yellow-400">● Non sauvegardé</span>}
+        {isDirty && <span style={{ color: "#e5c07b" }}>● Non sauvegardé</span>}
       </div>
     </div>
   );
-}
+});

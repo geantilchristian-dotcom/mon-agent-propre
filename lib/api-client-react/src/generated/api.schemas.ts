@@ -66,10 +66,28 @@ export interface ChatResponse {
   response: string;
 }
 
+export type HistoryMessageRole = typeof HistoryMessageRole[keyof typeof HistoryMessageRole];
+
+
+export const HistoryMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface HistoryMessage {
+  role: HistoryMessageRole;
+  content: string;
+}
+
 export interface AgentInput {
   message: string;
   /** @nullable */
   currentFile?: string | null;
+  /** @nullable */
+  imageBase64?: string | null;
+  /** @nullable */
+  imageMime?: string | null;
+  history?: HistoryMessage[];
 }
 
 export interface AgentResult {
@@ -79,6 +97,7 @@ export interface AgentResult {
   commitSha?: string | null;
   /** @nullable */
   model?: string | null;
+  suggestions?: string[];
 }
 
 export type ListGithubFilesParams = {
