@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: mon-agent-propre
+    runtime: node
+    plan: free
+    buildCommand: >
+      npm install -g pnpm &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @workspace/agent-ide run build &&
+      pnpm --filter @workspace/api-server run build
+    startCommand: node artifacts/api-server/dist/index.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: OPENROUTER_KEY
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
