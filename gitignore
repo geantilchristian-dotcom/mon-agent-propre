@@ -1,0 +1,17 @@
+# Dépendances (Ne jamais pousser node_modules sur GitHub)
+node_modules/
+
+# Variables d'environnement (Secret, ne jamais publier)
+.env
+
+# Dossier des sauvegardes de sécurité
+backups/
+
+# Logs et fichiers temporaires système
+*.log
+.DS_Store
+Thumbs.db
+
+# Dossiers de build (si vous utilisez des frameworks plus tard)
+dist/
+build/

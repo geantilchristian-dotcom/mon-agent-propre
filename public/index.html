@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { background: #0d0d0d; color: #e5e5e5; }
+        .sidebar { background: #161616; }
+        #preview { background: #1e1e1e; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+
+    <aside class="sidebar w-64 border-r border-gray-800 p-4 flex flex-col">
+        <h1 class="font-bold text-blue-500 mb-8">PRO-AGENT IDE</h1>
+        <div id="history" class="flex-1 space-y-2 text-sm text-gray-500 italic">Prêt.</div>
+        <button onclick="location.reload()" class="text-xs text-red-400 bg-red-900/10 p-2 rounded">Réinitialiser Session</button>
+    </aside>
+
+    <main class="flex-1 flex">
+        <div class="w-1/2 border-r border-gray-800 flex flex-col">
+            <div id="chat" class="flex-1 p-6 overflow-y-auto space-y-4"></div>
+            <div class="p-4 bg-[#161616] border-t border-gray-800">
+                <input type="text" id="file" placeholder="Nom du fichier (ex: server.js)" class="w-full bg-[#0d0d0d] p-2 mb-2 text-xs rounded border border-gray-700">
+                <div class="flex gap-2">
+                    <input type="text" id="msg" class="flex-1 bg-[#0d0d0d] p-3 rounded border border-gray-700" placeholder="Instruction pour l'IA...">
+                    <button onclick="envoyer()" id="sendBtn" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded font-bold transition">Envoyer</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="w-1/2 p-6 overflow-y-auto flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xs uppercase text-gray-500">Prévisualisation Code</h2>
+                <div class="flex gap-2">
+                    <button onclick="copierCode()" class="bg-gray-700 px-3 py-1 rounded text-[10px] uppercase font-bold">Copier</button>
+                    <button onclick="appliquerCode()" class="bg-green-700 hover:bg-green-600 px-3 py-1 rounded text-[10px] uppercase font-bold text-white">Appliquer au projet</button>
+                </div>
+            </div>
+            <pre id="preview" class="p-4 rounded text-sm overflow-x-auto flex-1 border border-gray-800"><code>// Résultat de l'IA ici...</code></pre>
+        </div>
+    </main>
+
+    <script>
+        function copierCode() {
+            navigator.clipboard.writeText(document.getElementById('preview').innerText);
+            alert("Code copié !");
+        }
+
+        async function appliquerCode() {
+            const filename = document.getElementById('file').value;
+            const code = document.getElementById('preview').innerText;
+            if(!filename) return alert("Indiquez le nom du fichier !");
+            
+            const res = await fetch('/api/appliquer', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ filename, code })
+            });
+            const data = await res.json();
+            alert(data.message || data.error);
+        }
+
+        async function envoyer() {
+            const btn = document.getElementById('sendBtn');
+            const msg = document.getElementById('msg').value;
+            const file = document.getElementById('file').value;
+            
+            btn.disabled = true; btn.innerText = '...';
+            
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ message: msg, filename: file })
+            });
+            const data = await res.json();
+            
+            document.getElementById('chat').innerHTML += `<div class="p-3 text-sm border-b border-gray-800">${marked.parse(data.response)}</div>`;
+            document.getElementById('preview').innerText = data.response.replace(/```[a-z]*\n/g, '').replace(/```/g, '');
+            hljs.highlightAll();
+            
+            btn.disabled = false; btn.innerText = 'Envoyer';
+        }
+    </script>
+</body>
+</html>
