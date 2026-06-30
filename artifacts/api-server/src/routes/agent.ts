@@ -671,14 +671,29 @@ function parseAgentRequest(body: unknown):
     return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY ou GEMINI_API_KEY dans les variables d'environnement.", status: 500 };
   }
 
-  return {
-    ok: true,
-    input: parsed.data,
-    kit: octokit ?? null,
-    owner: currentOwner ?? null,
-    repo: currentRepo ?? null,
-    keys: { claudeKey, groqKey, geminiKey },
-  };
+  /* If server-side state was lost (e.g. after a restart), recover from
+     the _githubToken / _githubRepo fields the client sends as fallback */
+  let kit = octokit ?? null;
+  let owner = currentOwner ?? null;
+  let repo = currentRepo ?? null;
+
+  if (!kit) {
+    const bodyObj = body as Record<string, unknown>;
+    const fallbackToken = typeof bodyObj["_githubToken"] === "string" ? bodyObj["_githubToken"] : null;
+    const fallbackRepo = typeof bodyObj["_githubRepo"] === "string" ? bodyObj["_githubRepo"] : null;
+    if (fallbackToken && fallbackRepo) {
+      const [fbOwner, fbRepo] = fallbackRepo.split("/");
+      if (fbOwner && fbRepo) {
+        kit = new Octokit({ auth: fallbackToken });
+        owner = fbOwner;
+        repo = fbRepo;
+        /* Also restore server state so subsequent requests reuse it */
+        setAgentGithub(kit, fbOwner, fbRepo);
+      }
+    }
+  }
+
+  return { ok: true, input: parsed.data, kit, owner, repo, keys: { claudeKey, groqKey, geminiKey } };
 }
 
 /* ------------------------------------------------------------------ */

@@ -484,6 +484,26 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
     const controller = new AbortController();
     abortRef.current = controller;
 
+    /* Read saved GitHub creds from localStorage for server-state recovery */
+    let fallbackToken: string | null = null;
+    let fallbackRepo: string | null = null;
+    try {
+      const saved = JSON.parse(localStorage.getItem("agent-ide-github-config") ?? "{}") as { token?: string; repo?: string };
+      fallbackToken = saved.token ?? null;
+      fallbackRepo = saved.repo ?? null;
+    } catch { /* ignore */ }
+
+    type SSEEvent = {
+      type: string;
+      message?: string;
+      response?: string;
+      filesChanged?: string[];
+      diffs?: FileDiff[];
+      commitSha?: string;
+      model?: string;
+      suggestions?: string[];
+    };
+
     try {
       const resp = await fetch("/api/agent/stream", {
         method: "POST",
@@ -495,6 +515,8 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           imageMime,
           model: selectedModel === "auto" ? null : selectedModel,
           history,
+          _githubToken: fallbackToken,
+          _githubRepo: fallbackRepo,
         }),
         signal: controller.signal,
       });
@@ -508,7 +530,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
       const decoder = new TextDecoder();
       let buffer = "";
 
-      while (true) {
+      outer: while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -517,43 +539,42 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
+
+          /* Parse JSON — only catch parse errors, let logic errors propagate */
+          let ev: SSEEvent;
           try {
-            const ev = JSON.parse(line.slice(6)) as {
-              type: string;
-              message?: string;
-              response?: string;
-              filesChanged?: string[];
-              diffs?: FileDiff[];
-              commitSha?: string;
-              model?: string;
-              suggestions?: string[];
-            };
-            if (ev.type === "status" || ev.type === "turn" || ev.type === "reading" || ev.type === "committing") {
-              setStreamMsg(ev.message ?? "");
-              if (ev.type === "reading") setStatus("reading");
-              else if (ev.type === "committing") setStatus("writing");
-              else setStatus("thinking");
-            } else if (ev.type === "done") {
-              const hasChanges = (ev.filesChanged?.length ?? 0) > 0;
-              setStatus(hasChanges ? "done" : "idle");
-              setTimeout(() => setStatus("idle"), hasChanges ? 4000 : 0);
-              setMessages(prev => [...prev, {
-                role: "agent",
-                content: ev.response ?? "",
-                filesChanged: ev.filesChanged ?? [],
-                diffs: ev.diffs ?? [],
-                commitSha: ev.commitSha ?? undefined,
-                model: ev.model ?? undefined,
-                suggestions: ev.suggestions ?? [],
-              }]);
-              setStreamMsg("");
-              setIsPending(false);
-              if (hasChanges && onAgentCommit) onAgentCommit();
-              return;
-            } else if (ev.type === "error") {
-              throw new Error(ev.message ?? "Erreur agent");
-            }
-          } catch { /* skip malformed event */ }
+            ev = JSON.parse(line.slice(6)) as SSEEvent;
+          } catch { continue; }
+
+          if (ev.type === "status" || ev.type === "turn" || ev.type === "reading" || ev.type === "committing") {
+            setStreamMsg(ev.message ?? "");
+            if (ev.type === "reading") setStatus("reading");
+            else if (ev.type === "committing") setStatus("writing");
+            else setStatus("thinking");
+          } else if (ev.type === "done") {
+            const hasChanges = (ev.filesChanged?.length ?? 0) > 0;
+            setStatus(hasChanges ? "done" : "idle");
+            setTimeout(() => setStatus("idle"), hasChanges ? 4000 : 0);
+            setMessages(prev => [...prev, {
+              role: "agent",
+              content: ev.response ?? "",
+              filesChanged: ev.filesChanged ?? [],
+              diffs: ev.diffs ?? [],
+              commitSha: ev.commitSha ?? undefined,
+              model: ev.model ?? undefined,
+              suggestions: ev.suggestions ?? [],
+            }]);
+            setStreamMsg("");
+            setIsPending(false);
+            if (hasChanges && onAgentCommit) onAgentCommit();
+            return;
+          } else if (ev.type === "error") {
+            /* Throw outside inner catch so it reaches the outer handler */
+            throw new Error(ev.message ?? "Erreur agent");
+          }
+
+          /* Break out of both loops cleanly when needed */
+          if (ev.type === "done" || ev.type === "error") break outer;
         }
       }
     } catch (e: unknown) {
