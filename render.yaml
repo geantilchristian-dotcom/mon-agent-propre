@@ -5,7 +5,7 @@ services:
       plan: free
       buildCommand: >-
         npm install -g pnpm &&
-        pnpm install --frozen-lockfile &&
+        pnpm install &&
         pnpm --filter @workspace/agent-ide run build &&
         pnpm --filter @workspace/api-server run build
       startCommand: node artifacts/api-server/dist/index.mjs
