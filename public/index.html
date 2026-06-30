@@ -4,91 +4,69 @@
     <meta charset="UTF-8">
     <title>Agent IDE Pro</title>
     <style>
-        :root { --bg: #1e1e1e; --sidebar: #252526; --accent: #007acc; --border: #333; }
-        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #fff; font-family: 'Segoe UI', sans-serif; }
-        
-        .sidebar { width: 260px; background: var(--sidebar); border-right: 1px solid var(--border); padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        :root { --bg: #1e1e1e; --sidebar: #252526; --accent: #007acc; }
+        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: #fff; font-family: sans-serif; }
+        .sidebar { width: 260px; background: var(--sidebar); padding: 15px; border-right: 1px solid #333; }
         .main { flex: 1; display: flex; flex-direction: column; }
-        
-        /* Éditeur sobre (plus de vert) */
-        #editor { flex: 1; padding: 20px; background: #000; color: #e0e0e0; font-family: 'Consolas', monospace; overflow: auto; white-space: pre-wrap; font-size: 14px; }
-        
-        .chat-zone { height: 200px; border-top: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 5px; background: #252526; }
-        
-        input { background: #3c3c3c; border: 1px solid var(--border); color: white; padding: 8px; border-radius: 4px; }
-        button { background: var(--accent); color: white; border: none; padding: 8px; cursor: pointer; border-radius: 4px; font-weight: bold; }
-        
-        ul { list-style: none; padding: 0; }
-        li { cursor: pointer; padding: 6px 0; color: #ccc; border-bottom: 1px solid #333; }
-        li:hover { color: white; }
+        #editor { flex: 1; padding: 20px; background: #000; color: #e0e0e0; font-family: monospace; overflow: auto; white-space: pre-wrap; outline: none; }
+        .toolbar { padding: 10px; background: #252526; display: flex; gap: 10px; }
+        .chat-zone { height: 180px; background: #1e1e1e; padding: 10px; border-top: 1px solid #333; }
     </style>
 </head>
 <body>
-
-<div class="sidebar">
-    <strong>Configuration</strong>
-    <input id="token" placeholder="GitHub Token">
-    <input id="repo" placeholder="Utilisateur/Repo">
-    <button onclick="connecter()">Connecter l'Agent</button>
-    <hr style="width:100%; border:0; border-top:1px solid #444">
-    <strong>Explorateur</strong>
-    <ul id="file-list"></ul>
-</div>
-
-<div class="main">
-    <div id="editor">Sélectionnez un projet pour commencer...</div>
-    <div class="chat-zone">
-        <div id="messages" style="flex:1; overflow-y:auto; font-size: 13px;"></div>
-        <div style="display:flex; gap:10px;">
-            <input id="user-msg" style="flex:1" placeholder="Demandez une modification...">
+    <div class="sidebar">
+        <input id="token" placeholder="GitHub Token" style="width:100%"><br><br>
+        <input id="repo" placeholder="Utilisateur/Repo" style="width:100%"><br><br>
+        <button onclick="connecter()">Connexion Dépôt</button>
+        <ul id="file-list"></ul>
+    </div>
+    <div class="main">
+        <div class="toolbar">
+            <button onclick="sauvegarder()" style="background:#28a745">Enregistrer le fichier</button>
+        </div>
+        <div id="editor" contenteditable="true">Sélectionnez un fichier...</div>
+        <div class="chat-zone">
+            <div id="messages" style="height:100px; overflow-y:auto; font-size:12px;"></div>
+            <input id="user-msg" style="width:80%" placeholder="Demandez une modification...">
             <button onclick="envoyer()">Envoyer</button>
         </div>
     </div>
-</div>
+    <input type="hidden" id="current-path">
+    <input type="hidden" id="current-sha">
 
-<script>
-    async function connecter() {
-        const token = document.getElementById('token').value;
-        const repo = document.getElementById('repo').value;
-        
-        const res = await fetch('/api/configurer', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ token, repo })
-        });
-        const data = await res.json();
-        alert(data.message);
-        
-        const filesRes = await fetch('/api/fichiers');
-        const files = await filesRes.json();
-        
-        document.getElementById('file-list').innerHTML = files.map(f => 
-            f.type === 'file' 
-            ? `<li onclick="lireFichier('${f.path}')">📄 ${f.name}</li>`
-            : `<li>📁 ${f.name}</li>`
-        ).join('');
-    }
+    <script>
+        async function connecter() {
+            const token = document.getElementById('token').value;
+            const repo = document.getElementById('repo').value;
+            await fetch('/api/configurer', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ token, repo }) });
+            const res = await fetch('/api/fichiers');
+            const files = await res.json();
+            document.getElementById('file-list').innerHTML = files.map(f => f.type==='file' ? `<li onclick="lireFichier('${f.path}')">📄 ${f.name}</li>` : `<li>📁 ${f.name}</li>`).join('');
+        }
 
-    async function lireFichier(path) {
-        const res = await fetch(`/api/lire?path=${encodeURIComponent(path)}`);
-        const data = await res.json();
-        document.getElementById('editor').innerText = data.content;
-    }
+        async function lireFichier(path) {
+            const res = await fetch(`/api/lire?path=${encodeURIComponent(path)}`);
+            const data = await res.json();
+            document.getElementById('editor').innerText = data.content;
+            document.getElementById('current-path').value = path;
+            document.getElementById('current-sha').value = data.sha;
+        }
 
-    async function envoyer() {
-        const msg = document.getElementById('user-msg').value;
-        const messages = document.getElementById('messages');
-        messages.innerHTML += `<div><b>Vous:</b> ${msg}</div>`;
-        
-        const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ message: msg })
-        });
-        const data = await res.json();
-        messages.innerHTML += `<div><b>IA:</b> ${data.response}</div>`;
-        document.getElementById('user-msg').value = '';
-    }
-</script>
+        async function sauvegarder() {
+            const path = document.getElementById('current-path').value;
+            const content = document.getElementById('editor').innerText;
+            const sha = document.getElementById('current-sha').value;
+            const res = await fetch('/api/ecrire', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ path, content, sha }) });
+            const data = await res.json();
+            alert(data.message);
+        }
+
+        async function envoyer() {
+            const msg = document.getElementById('user-msg').value;
+            const res = await fetch('/api/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ message: msg }) });
+            const data = await res.json();
+            document.getElementById('messages').innerHTML += `<div><b>IA:</b> ${data.response}</div>`;
+        }
+    </script>
 </body>
 </html>
