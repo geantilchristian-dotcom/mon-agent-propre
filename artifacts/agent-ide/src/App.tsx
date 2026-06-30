@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route } from "wouter";
   import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
   import { Toaster } from "@/components/ui/toaster";
   import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,7 +8,10 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
 
   const queryClient = new QueryClient();
 
-  class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  class ErrorBoundary extends Component<
+    { children: ReactNode },
+    { error: Error | null }
+  > {
     constructor(props: { children: ReactNode }) {
       super(props);
       this.state = { error: null };
@@ -19,16 +22,36 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
     render() {
       if (this.state.error) {
         return (
-          <div style={{ padding: "2rem", fontFamily: "monospace", color: "#f87171", background: "#0f172a", minHeight: "100vh" }}>
-            <h2 style={{ color: "#ef4444", marginBottom: "1rem" }}>Runtime Error</h2>
+          <div
+            style={{
+              padding: "2rem",
+              fontFamily: "monospace",
+              color: "#f87171",
+              background: "#0f172a",
+              minHeight: "100vh",
+            }}
+          >
+            <h2 style={{ color: "#ef4444", marginBottom: "1rem" }}>
+              Runtime Error
+            </h2>
             <pre style={{ whiteSpace: "pre-wrap", fontSize: "0.875rem" }}>
-              {this.state.error.message}\n\n{this.state.error.stack}
+              {this.state.error.message}
+              {"\n\n"}
+              {this.state.error.stack}
             </pre>
             <button
               onClick={() => this.setState({ error: null })}
-              style={{ marginTop: "1rem", padding: "0.5rem 1rem", background: "#1e40af", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}
+              style={{
+                marginTop: "1rem",
+                padding: "0.5rem 1rem",
+                background: "#1e40af",
+                color: "white",
+                border: "none",
+                borderRadius: "4px",
+                cursor: "pointer",
+              }}
             >
-              Try Again
+              Réessayer
             </button>
           </div>
         );
@@ -37,31 +60,21 @@ import { Switch, Route, Router as WouterRouter } from "wouter";
     }
   }
 
-  function Router() {
-    return (
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route component={NotFound} />
-      </Switch>
-    );
-  }
-
   function App() {
     useEffect(() => {
       document.documentElement.classList.add("dark");
     }, []);
 
-    const base = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
-
     return (
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <TooltipProvider>
-            <WouterRouter base={base}>
-              <Router />
-            </WouterRouter>
-            <Toaster />
+            <Switch>
+              <Route path="/" component={Home} />
+              <Route component={NotFound} />
+            </Switch>
           </TooltipProvider>
+          <Toaster />
         </QueryClientProvider>
       </ErrorBoundary>
     );
