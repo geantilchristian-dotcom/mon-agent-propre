@@ -6,24 +6,26 @@ const app = express();
 app.use(express.json());
 app.use(express.static('public'));
 
+// État global pour la session de l'IDE
 let octokit = null;
 let currentRepo = null;
 let conversationHistory = [];
 
-// 1. Configuration et Connexion GitHub
+// 1. Initialisation de la connexion GitHub
 app.post('/api/configurer', (req, res) => {
     const { token, repo } = req.body;
+    if (!token || !repo) return res.status(400).json({ error: "Champs requis" });
+    
     octokit = new Octokit({ auth: token });
     currentRepo = repo;
-    // Réinitialisation de l'historique lors d'une nouvelle connexion
     conversationHistory = [{ 
         role: "system", 
-        content: "Tu es un expert développeur. Modifie uniquement les parties du code demandées. Si l'utilisateur demande une modification, réponds en proposant le bloc de code corrigé sans tout réécrire inutilement." 
+        content: "Tu es un expert développeur. Lorsque l'utilisateur demande une modification sur un fichier, fournis uniquement le bloc de code corrigé ou la modification ciblée, pas tout le fichier. Sois concis." 
     }];
     res.json({ success: true, message: "Connecté à : " + repo });
 });
 
-// 2. Lister les fichiers
+// 2. Récupération de la liste des fichiers
 app.get('/api/fichiers', async (req, res) => {
     try {
         const [owner, repo] = currentRepo.split('/');
@@ -32,7 +34,7 @@ app.get('/api/fichiers', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 3. Lire le contenu d'un fichier
+// 3. Lecture d'un fichier (avec SHA pour la sauvegarde future)
 app.get('/api/lire', async (req, res) => {
     try {
         const [owner, repo] = currentRepo.split('/');
@@ -44,14 +46,14 @@ app.get('/api/lire', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 4. Enregistrer les modifications
+// 4. Écriture / Sauvegarde sur GitHub
 app.post('/api/ecrire', async (req, res) => {
     const { path, content, sha } = req.body;
     try {
         const [owner, repo] = currentRepo.split('/');
         await octokit.rest.repos.createOrUpdateFileContents({
             owner, repo, path,
-            message: "Mise à jour via Agent IDE",
+            message: "Mise à jour via mon Agent IDE",
             content: Buffer.from(content).toString('base64'),
             sha: sha
         });
@@ -59,14 +61,14 @@ app.post('/api/ecrire', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 5. Chat Intelligent avec Historique
+// 5. Moteur de discussion intelligent (Contextuel)
 app.post('/api/chat', async (req, res) => {
     const { message, fileContent, fileName } = req.body;
     
-    // Ajout du message utilisateur avec le contexte du fichier
+    // Ajout du contexte dans l'historique
     conversationHistory.push({ 
         role: "user", 
-        content: `Fichier : ${fileName}\nContenu actuel :\n${fileContent}\n\nDemande de l'utilisateur : ${message}` 
+        content: `Fichier en cours : ${fileName}\nContenu actuel :\n${fileContent}\n\nQuestion de l'utilisateur : ${message}` 
     });
     
     try {
@@ -85,9 +87,7 @@ app.post('/api/chat', async (req, res) => {
         const data = await response.json();
         const aiReply = data.choices[0].message.content;
         
-        // Sauvegarde de la réponse dans l'historique
         conversationHistory.push({ role: "assistant", content: aiReply });
-        
         res.json({ response: aiReply });
     } catch (e) { 
         res.status(500).json({ error: "Erreur IA : " + e.message }); 
@@ -95,4 +95,4 @@ app.post('/api/chat', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Serveur prêt sur port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Serveur opérationnel sur le port ${PORT}`));
