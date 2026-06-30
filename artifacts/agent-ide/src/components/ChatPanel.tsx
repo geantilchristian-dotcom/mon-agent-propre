@@ -3,8 +3,6 @@ import React, { useState, useRef, useEffect } from "react";
   import { Button } from "@/components/ui/button";
   import { Textarea } from "@/components/ui/textarea";
   import { Loader2, Send, RotateCcw, Bot, FileCode, Paperclip, X, Check, Zap, Copy } from "lucide-react";
-  import SyntaxHighlighter from "react-syntax-highlighter";
-  import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs";
 
   interface ChatPanelProps {
     currentPath: string | null;
@@ -34,7 +32,7 @@ import React, { useState, useRef, useEffect } from "react";
         onClick={handle}
         title="Copier"
         className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors
-          ${copied ? "text-green-400" : "text-muted-foreground hover:text-foreground"}
+          ${copied ? "text-green-400" : "text-zinc-400 hover:text-white"}
           ${className}`}
       >
         {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -53,11 +51,10 @@ import React, { useState, useRef, useEffect } from "react";
     const displayLang = lang || "text";
 
     return (
-      <div className="my-2 rounded-lg overflow-hidden border border-border/60">
-        {/* Top bar */}
-        <div className="flex items-center justify-between px-3 py-1 bg-zinc-800 border-b border-border/40">
-          <span className="text-[10px] font-mono text-zinc-400">{displayLang}</span>
-          <div className="flex items-center gap-1">
+      <div className="my-2 rounded-lg overflow-hidden border border-white/10">
+        <div className="flex items-center justify-between px-3 py-1.5 bg-zinc-900 border-b border-white/10">
+          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">{displayLang}</span>
+          <div className="flex items-center gap-2">
             <CopyButton text={code} />
             {onApply && (
               <button
@@ -65,34 +62,22 @@ import React, { useState, useRef, useEffect } from "react";
                 className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded transition-colors
                   ${applied ? "text-green-400" : "text-blue-400 hover:text-blue-300"}`}
               >
-                {applied ? <Check className="w-3 h-3" /> : <Check className="w-3 h-3" />}
+                {applied ? <Check className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
                 {applied ? "Appliqué !" : "Appliquer"}
               </button>
             )}
           </div>
         </div>
-        {/* Highlighted code */}
-        <SyntaxHighlighter
-          language={displayLang}
-          style={atomOneDark}
-          customStyle={{
-            margin: 0,
-            padding: "0.75rem",
-            fontSize: "0.75rem",
-            lineHeight: "1.5",
-            background: "#1a1b26",
-            maxHeight: "400px",
-            overflowY: "auto",
-          }}
-          wrapLongLines
+        <pre
+          className="overflow-auto text-[0.72rem] leading-relaxed font-mono text-zinc-100 p-3 m-0"
+          style={{ background: "#0d1117", maxHeight: "400px" }}
         >
-          {code}
-        </SyntaxHighlighter>
+          <code>{code}</code>
+        </pre>
       </div>
     );
   }
 
-  /** Parse markdown — split on triple-backtick fences */
   function parseContent(content: string, onApply?: (c: string) => void) {
     const parts: React.ReactNode[] = [];
     const regex = /```([\w+-]*)\n?([\s\S]*?)```/g;
@@ -191,16 +176,15 @@ import React, { useState, useRef, useEffect } from "react";
     };
 
     const statusDot: Record<ModelStatus, { color: string; label: string; pulse: boolean }> = {
-      idle:     { color: "bg-muted-foreground/40", label: "Prêt",           pulse: false },
-      thinking: { color: "bg-yellow-400",          label: "Génère...",       pulse: true  },
-      ok:       { color: "bg-green-400",            label: "Réponse reçue",  pulse: false },
-      error:    { color: "bg-red-400",              label: "Erreur",          pulse: false },
+      idle:     { color: "bg-muted-foreground/40", label: "Prêt",          pulse: false },
+      thinking: { color: "bg-yellow-400",          label: "Génère...",      pulse: true  },
+      ok:       { color: "bg-green-400",            label: "Réponse reçue", pulse: false },
+      error:    { color: "bg-red-400",              label: "Erreur",         pulse: false },
     };
     const { color, label, pulse } = statusDot[modelStatus];
 
     return (
       <div className="flex flex-col h-full bg-sidebar/50">
-        {/* Header */}
         <div className="p-3 border-b border-border flex items-center justify-between bg-muted/30 shrink-0">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center">
             <Bot className="w-3.5 h-3.5 mr-2" />
@@ -212,7 +196,6 @@ import React, { useState, useRef, useEffect } from "react";
           </Button>
         </div>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto p-3 space-y-4" ref={scrollRef}>
           {!currentPath && messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-center space-y-3">
@@ -272,7 +255,6 @@ import React, { useState, useRef, useEffect } from "react";
           )}
         </div>
 
-        {/* Input */}
         <div className="p-3 border-t border-border shrink-0 bg-background flex flex-col">
           {currentPath && (
             <div className="mb-2 flex items-center text-xs text-primary/80 bg-primary/10 px-2 py-1 rounded-sm w-fit">
@@ -313,16 +295,12 @@ import React, { useState, useRef, useEffect } from "react";
           </div>
         </div>
 
-        {/* Status bar */}
-        <div className="px-3 py-1.5 border-t border-border bg-muted/10 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-1.5">
-            <Zap className="w-3 h-3 text-blue-400" />
-            <span className="text-[10px] font-medium text-muted-foreground">{activeModel}</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-muted-foreground/60">{label}</span>
-            <span className={`w-1.5 h-1.5 rounded-full ${color} ${pulse ? "animate-pulse" : ""}`} />
-          </div>
+        <div className="px-3 py-1.5 border-t border-border bg-muted/20 flex items-center gap-2 shrink-0">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${color} ${pulse ? "animate-pulse" : ""}`} />
+          <span className="text-[10px] text-muted-foreground truncate">{label}</span>
+          <span className="ml-auto text-[10px] text-muted-foreground/50 truncate flex items-center gap-1">
+            <Zap className="w-2.5 h-2.5" />{activeModel}
+          </span>
         </div>
       </div>
     );
