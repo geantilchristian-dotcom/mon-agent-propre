@@ -122,6 +122,11 @@ export function Editor({ currentPath, connected, appliedCode, onApplied }: Edito
             setIsDirty(true);
           }}
           spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
+          data-gramm="false"
+          data-gramm_editor="false"
+          data-enable-grammarly="false"
           data-testid="editor-textarea"
         />
       </div>
