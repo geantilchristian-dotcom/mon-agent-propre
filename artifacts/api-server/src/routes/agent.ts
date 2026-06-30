@@ -85,12 +85,20 @@ function diffStats(oldContent: string | null, newContent: string): { added: numb
   return { added, removed, isNew: false };
 }
 
+async function getDefaultBranch(kit: Octokit, owner: string, repo: string): Promise<string> {
+  try {
+    const { data } = await kit.rest.repos.get({ owner, repo });
+    return data.default_branch;
+  } catch { return "main"; }
+}
+
 async function getHeadSha(
   kit: Octokit,
   owner: string,
   repo: string
 ): Promise<{ commitSha: string; treeSha: string }> {
-  const { data: ref } = await kit.rest.git.getRef({ owner, repo, ref: "heads/main" });
+  const branch = await getDefaultBranch(kit, owner, repo);
+  const { data: ref } = await kit.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
   const headSha = ref.object.sha;
   const { data: commit } = await kit.rest.git.getCommit({ owner, repo, commit_sha: headSha });
   return { commitSha: headSha, treeSha: commit.tree.sha };
@@ -494,9 +502,9 @@ interface AgentRunResult {
 type ProgressFn = (event: Record<string, unknown>) => void;
 
 async function runAgenticLoop(
-  kit: Octokit,
-  owner: string,
-  repo: string,
+  kit: Octokit | null,
+  owner: string | null,
+  repo: string | null,
   input: AgentRunInput,
   keys: { claudeKey?: string; groqKey?: string; geminiKey?: string },
   onProgress?: ProgressFn
@@ -507,14 +515,21 @@ async function runAgenticLoop(
 
   const preferred = (model ?? "auto") as PreferredModel;
 
-  /* 1. File tree */
-  onProgress?.({ type: "status", message: "📁 Chargement de l'arbre du projet..." });
-  const fileTree: string[] = [];
-  await collectTree(kit, owner, repo, "", fileTree, 300);
+  const hasGitHub = !!(kit && owner && repo);
 
-  /* 2. Auto-read architecture files */
-  onProgress?.({ type: "status", message: `🔍 Analyse de ${fileTree.length} fichiers...` });
-  const archContext = await autoReadArchitectureFiles(kit, owner, repo, fileTree);
+  /* 1. File tree (only if GitHub connected) */
+  const fileTree: string[] = [];
+  if (hasGitHub) {
+    onProgress?.({ type: "status", message: "📁 Chargement de l'arbre du projet..." });
+    await collectTree(kit!, owner!, repo!, "", fileTree, 300);
+  }
+
+  /* 2. Auto-read architecture files (only if GitHub connected) */
+  let archContext = "";
+  if (hasGitHub && fileTree.length > 0) {
+    onProgress?.({ type: "status", message: `🔍 Analyse de ${fileTree.length} fichiers...` });
+    archContext = await autoReadArchitectureFiles(kit!, owner!, repo!, fileTree);
+  }
 
   const systemPrompt = buildSystemPrompt(fileTree);
 
@@ -577,7 +592,11 @@ async function runAgenticLoop(
     const fileContents: string[] = [];
     for (const p of newPaths.slice(0, 15)) {
       readDone.add(p);
-      const f = await readFile(kit, owner, repo, p);
+      if (!hasGitHub) {
+        fileContents.push(`=== ${p} ===\n(GitHub non connecté — impossible de lire)`);
+        continue;
+      }
+      const f = await readFile(kit!, owner!, repo!, p);
       if (f) {
         readCache.set(p, f.content);
         const truncated = truncateContent(f.content);
@@ -615,11 +634,13 @@ async function runAgenticLoop(
 
   /* 8. Commit */
   let commitSha: string | null = null;
-  if (writes.length > 0 || deletes.length > 0) {
+  if ((writes.length > 0 || deletes.length > 0) && hasGitHub) {
     onProgress?.({ type: "committing", files: filesChanged, message: `✏️ Commit de ${filesChanged.length} fichier(s)...` });
     const firstLine = cleanResponse(lastText).split("\n")[0]?.slice(0, 72) ?? message.slice(0, 72);
-    commitSha = await batchCommit(kit, owner, repo, writes, deletes,
+    commitSha = await batchCommit(kit!, owner!, repo!, writes, deletes,
       `feat(agent): ${firstLine}\n\n${filesChanged.map((f) => `- ${f}`).join("\n")}`);
+  } else if ((writes.length > 0 || deletes.length > 0) && !hasGitHub) {
+    onProgress?.({ type: "status", message: "⚠️ GitHub non connecté — les modifications ne peuvent pas être commitées." });
   }
 
   return {
@@ -637,11 +658,8 @@ async function runAgenticLoop(
 /* ------------------------------------------------------------------ */
 
 function parseAgentRequest(body: unknown):
-  | { ok: true; input: AgentRunInput; kit: Octokit; owner: string; repo: string; keys: { claudeKey?: string; groqKey?: string; geminiKey?: string }; error?: never }
+  | { ok: true; input: AgentRunInput; kit: Octokit | null; owner: string | null; repo: string | null; keys: { claudeKey?: string; groqKey?: string; geminiKey?: string }; error?: never }
   | { ok: false; error: string; status: number } {
-  if (!octokit || !currentOwner || !currentRepo) {
-    return { ok: false, error: "Non configuré. Connectez d'abord un dépôt GitHub.", status: 400 };
-  }
   const parsed = RunAgentBody.safeParse(body);
   if (!parsed.success) return { ok: false, error: "Corps de requête invalide", status: 400 };
 
@@ -650,10 +668,17 @@ function parseAgentRequest(body: unknown):
   const geminiKey = process.env["GEMINI_API_KEY"];
 
   if (!claudeKey && !groqKey && !geminiKey) {
-    return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY ou GEMINI_API_KEY.", status: 500 };
+    return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY ou GEMINI_API_KEY dans les variables d'environnement.", status: 500 };
   }
 
-  return { ok: true, input: parsed.data, kit: octokit, owner: currentOwner, repo: currentRepo, keys: { claudeKey, groqKey, geminiKey } };
+  return {
+    ok: true,
+    input: parsed.data,
+    kit: octokit ?? null,
+    owner: currentOwner ?? null,
+    repo: currentRepo ?? null,
+    keys: { claudeKey, groqKey, geminiKey },
+  };
 }
 
 /* ------------------------------------------------------------------ */
