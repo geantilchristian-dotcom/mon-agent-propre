@@ -1,29 +1,15 @@
 services:
-    - type: web
-      name: mon-agent-propre
-      runtime: node
-      plan: free
-      buildCommand: >-
-        npm install -g pnpm &&
-        pnpm install --no-frozen-lockfile &&
-        pnpm --filter @workspace/agent-ide run build &&
-        pnpm --filter @workspace/api-server run build
-      startCommand: node artifacts/api-server/dist/index.mjs
-      envVars:
-        - key: NODE_ENV
-          value: production
-        - key: PORT
-          value: 3000
-        - key: BASE_PATH
-          value: /
-        - key: GROQ_API_KEY
-          sync: false
-        - key: GEMINI_API_KEY
-          sync: false
-        - key: OPENROUTER_KEY
-          sync: false
-        - key: SESSION_SECRET
-          generateValue: true
-        - key: DATABASE_URL
-          sync: false
-  
+  - type: web
+    name: mon-agent-propre
+    runtime: node
+    buildCommand: >
+      npm install -g pnpm &&
+      pnpm install --frozen-lockfile &&
+      BASE_PATH=/ pnpm --filter @workspace/agent-ide run build &&
+      pnpm --filter @workspace/api-server run build
+    startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        generateValue: false
