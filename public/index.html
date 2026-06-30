@@ -2,117 +2,18 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Agent IDE | Premium</title>
-    <style>
-        :root { --bg: #0d1117; --sidebar: #161b22; --border: #30363d; --text: #c9d1d9; --accent: #238636; --ai: #30363d; --user: #1f6feb; }
-        * { box-sizing: border-box; }
-        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; }
-
-        /* Sidebar */
-        .sidebar { width: 260px; background: var(--sidebar); border-right: 1px solid var(--border); padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        
-        /* Main */
-        .main { flex: 1; display: flex; flex-direction: column; }
-        .toolbar { padding: 10px; background: #161b22; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-        #editor { flex: 1; background: #000; color: #58a6ff; padding: 20px; outline: none; font-family: 'Fira Code', monospace; overflow: auto; white-space: pre-wrap; line-height: 1.6; }
-
-        /* Chat */
-        .chat-panel { width: 350px; background: var(--sidebar); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
-        #messages { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-        .msg { padding: 10px; border-radius: 8px; font-size: 13px; max-width: 90%; }
-        .msg.vous { background: var(--user); align-self: flex-end; }
-        .msg.ia { background: var(--ai); align-self: flex-start; }
-        
-        /* UI */
-        input, button { padding: 8px; border-radius: 5px; border: 1px solid var(--border); background: #0d1117; color: white; }
-        button { background: var(--accent); cursor: pointer; font-weight: bold; }
-        li { cursor: pointer; padding: 5px; color: #8b949e; list-style: none; }
-        li:hover { color: #fff; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joindre un projet GitHub</title>
 </head>
 <body>
-
-    <div class="sidebar">
-        <input id="token" placeholder="GitHub Token" type="password">
-        <input id="repo" placeholder="User/Repo">
-        <button onclick="connecter()">Connexion Dépôt</button>
-        <hr style="width:100%; border:0; border-top:1px solid var(--border)">
-        <ul id="file-list"></ul>
-    </div>
-
-    <div class="main">
-        <div class="toolbar">
-            <span id="filename" style="font-weight:bold;">Aucun fichier</span>
-            <button onclick="sauvegarder()">Enregistrer sur GitHub</button>
-        </div>
-        <div id="editor" contenteditable="true" spellcheck="false"></div>
-    </div>
-
-    <div class="chat-panel">
-        <div id="messages"></div>
-        <div style="padding:15px; border-top:1px solid var(--border);">
-            <input id="user-msg" style="width:100%" placeholder="Demande une modif..." onkeypress="if(event.key==='Enter') envoyer()">
-            <button style="width:100%; margin-top:5px;" onclick="envoyer()">Envoyer</button>
-        </div>
-    </div>
-
-    <input type="hidden" id="current-path">
-    <input type="hidden" id="current-sha">
-
+    <h1>Joindre un projet GitHub</h1>
+    <button id="join-project-button">Joindre un projet</button>
     <script>
-        // Restauration auto
-        window.onload = () => {
-            if(localStorage.getItem('saved_code')) document.getElementById('editor').innerText = localStorage.getItem('saved_code');
-        };
-        document.getElementById('editor').addEventListener('input', () => {
-            localStorage.setItem('saved_code', document.getElementById('editor').innerText);
+        document.getElementById('join-project-button').addEventListener('click', function() {
+            // Ici, vous pouvez ajouter la logique pour joindre un projet GitHub
+            // Par exemple, ouvrir une fenêtre pour autoriser l'accès à GitHub
+            window.open('https://github.com/login/oauth/authorize?client_id=VOTRE_CLIENT_ID', '_blank');
         });
-
-        async function connecter() {
-            const token = document.getElementById('token').value;
-            const repo = document.getElementById('repo').value;
-            await fetch('/api/configurer', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ token, repo }) });
-            const res = await fetch('/api/fichiers');
-            const files = await res.json();
-            document.getElementById('file-list').innerHTML = files.map(f => 
-                `<li onclick="${f.type==='file' ? `lireFichier('${f.path}')` : `alert('Dossier: ${f.name}')`}">
-                 ${f.type==='file'?'📄':'📁'} ${f.name}</li>`).join('');
-        }
-
-        async function lireFichier(path) {
-            const res = await fetch(`/api/lire?path=${encodeURIComponent(path)}`);
-            const data = await res.json();
-            if(data.type === 'file') {
-                document.getElementById('editor').innerText = data.content;
-                document.getElementById('filename').innerText = path;
-                document.getElementById('current-path').value = path;
-                document.getElementById('current-sha').value = data.sha;
-                localStorage.setItem('saved_code', data.content);
-            }
-        }
-
-        async function sauvegarder() {
-            const res = await fetch('/api/ecrire', { method: 'POST', headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ path: document.getElementById('current-path').value, content: document.getElementById('editor').innerText, sha: document.getElementById('current-sha').value }) });
-            alert('Sauvegardé avec succès !');
-        }
-
-        async function envoyer() {
-            const msgInput = document.getElementById('user-msg');
-            const msg = msgInput.value;
-            const messages = document.getElementById('messages');
-            
-            messages.innerHTML += `<div class="msg vous"><b>Vous:</b> ${msg}</div>`;
-            const res = await fetch('/api/chat', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
-                body: JSON.stringify({ message: msg, fileContent: document.getElementById('editor').innerText, fileName: document.getElementById('current-path').value }) 
-            });
-            const data = await res.json();
-            messages.innerHTML += `<div class="msg ia"><b>IA:</b> <pre style="white-space:pre-wrap;">${data.response}</pre></div>`;
-            msgInput.value = '';
-            messages.scrollTop = messages.scrollHeight;
-        }
     </script>
 </body>
 </html>
