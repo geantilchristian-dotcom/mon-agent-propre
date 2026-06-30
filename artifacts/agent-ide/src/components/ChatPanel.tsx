@@ -1,6 +1,4 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import hljs from "highlight.js";
 import { useResetChat } from "@workspace/api-client-react";
 import { Textarea } from "@/components/ui/textarea";
@@ -137,104 +135,148 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Markdown renderer                                                   */
+/*  Lightweight Markdown renderer (no external deps)                   */
 /* ------------------------------------------------------------------ */
 
+function renderInline(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  // Patterns: **bold**, *italic*, `code`, [link](url)
+  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let idx = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(<span key={`t${idx++}`}>{text.slice(last, m.index)}</span>);
+    if (m[2] !== undefined) {
+      parts.push(<strong key={`b${idx++}`} style={{ fontWeight: 600, color: "#e6edf3" }}>{m[2]}</strong>);
+    } else if (m[3] !== undefined) {
+      parts.push(<em key={`i${idx++}`} style={{ fontStyle: "italic" }}>{m[3]}</em>);
+    } else if (m[4] !== undefined) {
+      parts.push(
+        <code key={`c${idx++}`} style={{ fontFamily: MONO, fontSize: 11.5, background: "rgba(110,118,129,0.2)", padding: "1px 5px", borderRadius: 4, color: "#e06c75" }}>
+          {m[4]}
+        </code>
+      );
+    } else if (m[5] !== undefined && m[6] !== undefined) {
+      parts.push(
+        <a key={`a${idx++}`} href={m[6]} target="_blank" rel="noopener noreferrer" style={{ color: "#58a6ff", textDecoration: "underline" }}>
+          {m[5]}
+        </a>
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<span key={`t${idx++}`}>{text.slice(last)}</span>);
+  return parts;
+}
+
 function MarkdownContent({ content }: { content: string }) {
+  const lines = content.split("\n");
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  let listItems: React.ReactNode[] = [];
+  let listOrdered = false;
+
+  const flushList = () => {
+    if (listItems.length === 0) return;
+    nodes.push(
+      listOrdered
+        ? <ol key={`ol-${i}`} style={{ margin: "4px 0", paddingLeft: 20, listStyleType: "decimal" }}>{listItems}</ol>
+        : <ul key={`ul-${i}`} style={{ margin: "4px 0", paddingLeft: 20, listStyleType: "disc" }}>{listItems}</ul>
+    );
+    listItems = [];
+  };
+
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+
+    // Fenced code block
+    const fenceMatch = line.match(/^```(\w*)/);
+    if (fenceMatch) {
+      flushList();
+      const lang = fenceMatch[1] ?? "";
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !(lines[i] ?? "").startsWith("```")) {
+        codeLines.push(lines[i] ?? "");
+        i++;
+      }
+      nodes.push(<CodeBlock key={`code-${i}`} lang={lang} code={codeLines.join("\n")} />);
+      i++;
+      continue;
+    }
+
+    // Headings
+    const h3 = line.match(/^### (.+)/);
+    const h2 = line.match(/^## (.+)/);
+    const h1 = line.match(/^# (.+)/);
+    if (h3) { flushList(); nodes.push(<h3 key={`h3-${i}`} style={{ fontSize: 13, fontWeight: 600, margin: "8px 0 4px", color: "#e6edf3" }}>{renderInline(h3[1]!)}</h3>); i++; continue; }
+    if (h2) { flushList(); nodes.push(<h2 key={`h2-${i}`} style={{ fontSize: 14, fontWeight: 700, margin: "10px 0 4px", color: "#e6edf3" }}>{renderInline(h2[1]!)}</h2>); i++; continue; }
+    if (h1) { flushList(); nodes.push(<h1 key={`h1-${i}`} style={{ fontSize: 16, fontWeight: 700, margin: "12px 0 6px", color: "#e6edf3" }}>{renderInline(h1[1]!)}</h1>); i++; continue; }
+
+    // HR
+    if (/^---+$/.test(line.trim())) {
+      flushList();
+      nodes.push(<hr key={`hr-${i}`} style={{ border: "none", borderTop: "1px solid #21262d", margin: "10px 0" }} />);
+      i++;
+      continue;
+    }
+
+    // Blockquote
+    const bq = line.match(/^> (.+)/);
+    if (bq) {
+      flushList();
+      nodes.push(
+        <blockquote key={`bq-${i}`} style={{ margin: "6px 0", paddingLeft: 12, borderLeft: "3px solid #30363d", color: "#8b949e" }}>
+          {renderInline(bq[1]!)}
+        </blockquote>
+      );
+      i++;
+      continue;
+    }
+
+    // Unordered list
+    const ulMatch = line.match(/^[-*] (.+)/);
+    if (ulMatch) {
+      if (listItems.length > 0 && listOrdered) flushList();
+      listOrdered = false;
+      listItems.push(<li key={`li-${i}`} style={{ margin: "2px 0" }}>{renderInline(ulMatch[1]!)}</li>);
+      i++;
+      continue;
+    }
+
+    // Ordered list
+    const olMatch = line.match(/^\d+\. (.+)/);
+    if (olMatch) {
+      if (listItems.length > 0 && !listOrdered) flushList();
+      listOrdered = true;
+      listItems.push(<li key={`li-${i}`} style={{ margin: "2px 0" }}>{renderInline(olMatch[1]!)}</li>);
+      i++;
+      continue;
+    }
+
+    flushList();
+
+    // Empty line → spacing
+    if (line.trim() === "") {
+      nodes.push(<div key={`sp-${i}`} style={{ height: 6 }} />);
+      i++;
+      continue;
+    }
+
+    // Paragraph
+    nodes.push(
+      <p key={`p-${i}`} style={{ margin: "3px 0", lineHeight: 1.65 }}>
+        {renderInline(line)}
+      </p>
+    );
+    i++;
+  }
+  flushList();
+
   return (
     <div style={{ fontFamily: SANS, fontSize: 13, lineHeight: "1.65", color: "#c9d1d9" }}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          code({ className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className ?? "");
-            const lang = match?.[1] ?? "";
-            const code = String(children).replace(/\n$/, "");
-            const isBlock = code.includes("\n") || lang;
-            if (isBlock) {
-              return <CodeBlock lang={lang} code={code} />;
-            }
-            return (
-              <code
-                style={{
-                  fontFamily: MONO, fontSize: 11.5,
-                  background: "rgba(110,118,129,0.2)",
-                  padding: "1px 5px", borderRadius: 4,
-                  color: "#e06c75",
-                }}
-                {...props}
-              >
-                {children}
-              </code>
-            );
-          },
-          p({ children }) {
-            return <p style={{ margin: "6px 0", lineHeight: 1.65 }}>{children}</p>;
-          },
-          h1({ children }) {
-            return <h1 style={{ fontSize: 16, fontWeight: 700, margin: "12px 0 6px", color: "#e6edf3" }}>{children}</h1>;
-          },
-          h2({ children }) {
-            return <h2 style={{ fontSize: 14, fontWeight: 700, margin: "10px 0 4px", color: "#e6edf3" }}>{children}</h2>;
-          },
-          h3({ children }) {
-            return <h3 style={{ fontSize: 13, fontWeight: 600, margin: "8px 0 4px", color: "#e6edf3" }}>{children}</h3>;
-          },
-          ul({ children }) {
-            return <ul style={{ margin: "4px 0", paddingLeft: 20, listStyleType: "disc" }}>{children}</ul>;
-          },
-          ol({ children }) {
-            return <ol style={{ margin: "4px 0", paddingLeft: 20, listStyleType: "decimal" }}>{children}</ol>;
-          },
-          li({ children }) {
-            return <li style={{ margin: "2px 0" }}>{children}</li>;
-          },
-          blockquote({ children }) {
-            return (
-              <blockquote style={{
-                margin: "6px 0",
-                paddingLeft: 12,
-                borderLeft: "3px solid #30363d",
-                color: "#8b949e",
-              }}>
-                {children}
-              </blockquote>
-            );
-          },
-          a({ href, children }) {
-            return (
-              <a href={href} target="_blank" rel="noopener noreferrer"
-                style={{ color: "#58a6ff", textDecoration: "underline" }}>
-                {children}
-              </a>
-            );
-          },
-          strong({ children }) {
-            return <strong style={{ fontWeight: 600, color: "#e6edf3" }}>{children}</strong>;
-          },
-          em({ children }) {
-            return <em style={{ fontStyle: "italic", color: "#c9d1d9" }}>{children}</em>;
-          },
-          hr() {
-            return <hr style={{ border: "none", borderTop: "1px solid #21262d", margin: "10px 0" }} />;
-          },
-          table({ children }) {
-            return (
-              <div style={{ overflowX: "auto", margin: "8px 0" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>{children}</table>
-              </div>
-            );
-          },
-          th({ children }) {
-            return <th style={{ padding: "4px 10px", borderBottom: "1px solid #30363d", textAlign: "left", color: "#8b949e", fontWeight: 600 }}>{children}</th>;
-          },
-          td({ children }) {
-            return <td style={{ padding: "4px 10px", borderBottom: "1px solid #21262d" }}>{children}</td>;
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
+      {nodes}
     </div>
   );
 }
