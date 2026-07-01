@@ -18,6 +18,7 @@ interface EditorProps {
   onApplied?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onSavingChange?: (saving: boolean) => void;
+  agentRefreshKey?: number;
 }
 
 function getLanguageLabel(path: string): string {
@@ -53,7 +54,7 @@ const PAIR: Record<string, string> = { "(": ")", "[": "]", "{": "}", '"': '"', "
 const OPEN_PAIRS = new Set(["(", "[", "{"]);
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
-  { currentPath, connected, appliedCode, onApplied, onDirtyChange, onSavingChange },
+  { currentPath, connected, appliedCode, onApplied, onDirtyChange, onSavingChange, agentRefreshKey },
   ref
 ) {
   const [content, setContent] = useState("");
@@ -66,6 +67,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(function Editor(
   const hlRef = useRef<HTMLDivElement>(null);
   const lnRef = useRef<HTMLDivElement>(null);
   const initRef = useRef<string | null>(null);
+
+  // When agent commits, re-fetch the current file to get the fresh SHA
+  useEffect(() => {
+    if (!agentRefreshKey || !currentPath) return;
+    initRef.current = null; // force re-init on next fetch
+    queryClient.invalidateQueries({ queryKey: getReadGithubFileQueryKey({ path: currentPath }) });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentRefreshKey]);
 
   const { data: fileData, isLoading } = useReadGithubFile(
     { path: currentPath || "" },
