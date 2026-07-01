@@ -514,6 +514,25 @@ function parseWrites(text: string): { path: string; content: string }[] {
   return writes;
 }
 
+function parseEdits(text: string): { path: string; old: string; new: string }[] {
+  const edits: { path: string; old: string; new: string }[] = [];
+  const re = /<edit_file\s+path="([^"]+)">([\s\S]*?)<\/edit_file>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const inner = m[2]!;
+    const oldMatch = inner.match(/<old>([\s\S]*?)<\/old>/);
+    const newMatch = inner.match(/<new>([\s\S]*?)<\/new>/);
+    if (oldMatch && newMatch) {
+      edits.push({
+        path: m[1]!,
+        old: oldMatch[1]!.replace(/^\n/, "").replace(/\n$/, ""),
+        new: newMatch[1]!.replace(/^\n/, "").replace(/\n$/, ""),
+      });
+    }
+  }
+  return edits;
+}
+
 function parseDeletes(text: string): { path: string }[] {
   const deletes: { path: string }[] = [];
   const re = /<delete_file\s+path="([^"]+)"\s*\/>/g;
@@ -535,6 +554,7 @@ function cleanResponse(text: string): string {
   return text
     .replace(/<read_file\s+path="[^"]+"\s*\/>/g, "")
     .replace(/<write_file\s+path="[^"]+">([\s\S]*?)<\/write_file>/g, "")
+    .replace(/<edit_file\s+path="[^"]+">([\s\S]*?)<\/edit_file>/g, "")
     .replace(/<delete_file\s+path="[^"]+"\s*\/>/g, "")
     .replace(/<suggestions>[\s\S]*?<\/suggestions>/g, "")
     .replace(/\n{3,}/g, "\n\n")
@@ -570,9 +590,21 @@ ${fileTree.map((f) => `  ${f}`).join("\n")}
 ### Lire un fichier (OBLIGATOIRE avant toute modification)
 <read_file path="chemin/vers/fichier.ext" />
 
-### Créer ou réécrire un fichier (contenu TOUJOURS intégral)
-<write_file path="chemin/vers/fichier.ext">
-CONTENU COMPLET DU FICHIER — jamais de "...", jamais de troncature
+### Modifier un fichier EXISTANT — outil chirurgical obligatoire
+<edit_file path="chemin/vers/fichier.ext">
+<old>
+texte exact à remplacer (copié mot pour mot depuis le fichier lu)
+</old>
+<new>
+nouveau texte qui le remplace
+</new>
+</edit_file>
+
+Tu peux utiliser plusieurs <edit_file> pour le même fichier si plusieurs passages doivent changer.
+
+### Créer un fichier NOUVEAU (n'existe pas encore)
+<write_file path="chemin/vers/nouveau-fichier.ext">
+CONTENU COMPLET du nouveau fichier
 </write_file>
 
 ### Supprimer un fichier
@@ -580,15 +612,14 @@ CONTENU COMPLET DU FICHIER — jamais de "...", jamais de troncature
 
 ---
 
-## Règles pour les tâches de code
+## Règles ABSOLUES pour les tâches de code
 
-1. **LIS avant d'écrire** — Ne jamais modifier un fichier sans l'avoir lu intégralement
-2. **Chirurgical** — Modifie UNIQUEMENT ce qui est demandé. Ne jamais reformater, réindenter, ni réécrire des sections non concernées par la demande
-3. **Scope minimal** — Si la demande concerne un composant, ne touche qu'à ce composant. Ne modifie pas d'autres fichiers sauf si c'est strictement nécessaire (import cassé, type manquant, etc.)
-4. **Contenu intégral** — write_file = fichier complet, zéro ellipse, mais identique à l'original sauf les lignes modifiées
-5. **Tous les fichiers impactés** — Mets à jour imports, router, navigation si et seulement si une modification les casse
-6. **Imports valides** — Vérifie que chaque import existe
-7. **Même stack** — Respecte strictement les patterns, conventions et bibliothèques existants. Ne pas en introduire de nouveaux sans demande explicite` : `## Aucun projet connecté
+1. **LIS TOUJOURS avant de modifier** — <read_file /> est obligatoire avant tout edit_file
+2. **edit_file pour les fichiers existants, write_file uniquement pour les nouveaux** — Ne jamais réécrire un fichier existant entier avec write_file
+3. **old = copie exacte** — Le texte dans <old> doit être identique au fichier (même indentation, même espaces, même ponctuation). Si ce n'est pas exact, la modification échoue.
+4. **Chirurgical** — Ne modifie QUE les lignes concernées. N'ajoute, ne reformate, ne réindente rien d'autre.
+5. **Scope minimal** — Si la demande concerne une fonction, ne touche qu'à cette fonction
+6. **Même stack** — Respecte strictement les patterns et bibliothèques existants` : `## Aucun projet connecté
 Tu peux répondre à toutes les questions générales. Pour des tâches de code sur un dépôt, l'utilisateur doit d'abord connecter un dépôt GitHub via la sidebar.`}
 
 ---
@@ -755,7 +786,7 @@ async function runAgenticLoop(
         if (attempt < MAX_RETRIES) {
           onProgress?.({ type: "status", message: `⚠️ Réponse insuffisante, nouvelle tentative (${attempt + 1}/${MAX_RETRIES})...` });
           msgs.push({ role: "assistant", content: t.text });
-          msgs.push({ role: "user", content: "Ta réponse était vide ou incomplète. Reprends et effectue les modifications demandées avec write_file." });
+          msgs.push({ role: "user", content: "Ta réponse était vide ou incomplète. Reprends : utilise edit_file pour modifier des fichiers existants, write_file uniquement pour créer de nouveaux fichiers." });
         }
       } catch (e) {
         if (attempt === MAX_RETRIES) throw e;
@@ -797,9 +828,62 @@ async function runAgenticLoop(
     });
   }
 
-  /* 6. Parse writes & deletes */
-  const writes = parseWrites(lastText);
+  /* 6. Parse writes, edits & deletes */
+  const rawWrites = parseWrites(lastText);
+  const rawEdits = parseEdits(lastText);
   const deletes = parseDeletes(lastText);
+
+  /* Apply edit_file patches: old→new string replacement on cached content */
+  const editErrors: string[] = [];
+  const editedWrites: { path: string; content: string }[] = [];
+
+  for (const edit of rawEdits) {
+    let base = readCache.get(edit.path) ?? null;
+    if (base === null && hasGitHub) {
+      const f = await readFile(kit!, owner!, repo!, edit.path);
+      if (f) { base = f.content; readCache.set(edit.path, f.content); }
+    }
+    if (base === null) {
+      editErrors.push(`edit_file "${edit.path}": fichier introuvable`);
+      continue;
+    }
+    if (!base.includes(edit.old)) {
+      editErrors.push(`edit_file "${edit.path}": le texte <old> n'a pas été trouvé exactement — vérifiez l'indentation et la ponctuation`);
+      continue;
+    }
+    const patched = base.replace(edit.old, edit.new);
+    // Merge with any existing write for the same path (multiple edits on same file)
+    const existing = editedWrites.find((w) => w.path === edit.path);
+    if (existing) {
+      existing.content = existing.content.replace(edit.old, edit.new);
+    } else {
+      editedWrites.push({ path: edit.path, content: patched });
+      readCache.set(edit.path, patched); // update cache for subsequent edits on same file
+    }
+  }
+
+  // If there were edit errors, feed them back so the agent can self-correct
+  if (editErrors.length > 0 && hasGitHub) {
+    msgs.push({ role: "assistant", content: lastText });
+    msgs.push({ role: "user", content: `Erreurs d'application des edit_file :\n${editErrors.map((e) => `- ${e}`).join("\n")}\n\nRelis le fichier avec read_file et corrige tes balises <old> pour qu'elles correspondent exactement au contenu.` });
+    // Re-run one more turn to self-correct
+    const correction = await callLLM(msgs, keys.groqKey, keys.geminiKey, undefined, keys.claudeKey, preferred, keys.openrouterKey, keys.openaiKey).catch(() => null);
+    if (correction && correction.text.trim().length > 50) {
+      lastText = correction.text;
+      const correctedEdits = parseEdits(lastText);
+      for (const edit of correctedEdits) {
+        const base = readCache.get(edit.path);
+        if (base && base.includes(edit.old)) {
+          const patched = base.replace(edit.old, edit.new);
+          editedWrites.push({ path: edit.path, content: patched });
+          readCache.set(edit.path, patched);
+        }
+      }
+      rawWrites.push(...parseWrites(lastText));
+    }
+  }
+
+  const writes = [...rawWrites, ...editedWrites];
   const filesChanged = [...writes.map((w) => w.path), ...deletes.map((d) => d.path)];
 
   /* 7. Compute diffs using cached old content */
