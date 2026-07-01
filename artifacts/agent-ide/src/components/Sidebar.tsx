@@ -7,7 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, ChevronRight, ChevronDown, Github, Plus, Trash2, LogOut } from "lucide-react";
+import { Loader2, ChevronRight, ChevronDown, Github, Plus, Trash2, LogOut, History } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface SidebarProps {
@@ -20,6 +20,8 @@ interface SidebarProps {
   isConnecting: boolean;
   onNotify?: (text: string, ok: boolean) => void;
   refreshKey?: number;
+  /** Callback déclenché lorsqu’on clique sur le bouton “Historique” */
+  onShowHistory?: () => void;
 }
 
 /* ------------------------------------------------------------------ */
