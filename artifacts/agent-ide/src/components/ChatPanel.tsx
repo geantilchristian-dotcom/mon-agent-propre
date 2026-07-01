@@ -530,7 +530,7 @@ function PendingCommitCard({
   onCommit,
   onCancel,
 }: {
-  pending: { filesChanged: string[]; diffs: FileDiff[]; committing: boolean };
+  pending: { filesChanged: string[]; diffs: FileDiff[]; committing: boolean; summary: string };
   onCommit: () => void;
   onCancel: () => void;
 }) {
@@ -542,16 +542,36 @@ function PendingCommitCard({
       {/* Header */}
       <div
         className="flex items-center gap-2 px-3 py-2"
-        style={{ borderBottom: "1px solid #e3b341", background: "#2d2100" }}
+        style={{ borderBottom: "1px solid #21262d", background: "#2d2100" }}
       >
         <ShieldCheck className="w-3.5 h-3.5" style={{ color: "#e3b341" }} />
         <span style={{ fontFamily: SANS, fontSize: 11, fontWeight: 600, color: "#e3b341", flex: 1 }}>
-          {pending.filesChanged.length} fichier{pending.filesChanged.length > 1 ? "s" : ""} prêt{pending.filesChanged.length > 1 ? "s" : ""} — Voulez-vous pousser sur GitHub ?
+          Avant de pousser — voici ce qui a été modifié :
         </span>
       </div>
 
+      {/* Agent summary */}
+      {pending.summary && (
+        <div
+          className="px-3 py-2.5"
+          style={{
+            borderBottom: "1px solid #21262d",
+            fontSize: 12, lineHeight: 1.6, color: "#c9d1d9",
+            fontFamily: SANS, whiteSpace: "pre-wrap",
+            maxHeight: 220, overflowY: "auto",
+          }}
+        >
+          {pending.summary}
+        </div>
+      )}
+
       {/* File list */}
-      <div className="px-3 py-2 space-y-0.5">
+      <div className="px-3 py-2 space-y-0.5"
+        style={{ borderBottom: "1px solid #21262d" }}
+      >
+        <div style={{ fontSize: 10, fontWeight: 600, color: "#6e7681", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4, fontFamily: SANS }}>
+          {pending.filesChanged.length} fichier{pending.filesChanged.length > 1 ? "s" : ""} modifié{pending.filesChanged.length > 1 ? "s" : ""}
+        </div>
         {pending.filesChanged.map((f) => {
           const diff = pending.diffs.find((d) => d.path === f);
           return <FileChangeBadge key={f} path={f} diff={diff} />;
@@ -660,7 +680,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
     try { return localStorage.getItem("agent-ide-confirm-push") === "true"; } catch { return false; }
   });
   const [pendingCommit, setPendingCommit] = useState<{
-    stagedId: string; filesChanged: string[]; diffs: FileDiff[]; committing: boolean;
+    stagedId: string; filesChanged: string[]; diffs: FileDiff[]; committing: boolean; summary: string;
   } | null>(null);
 
   const [fileTree, setFileTree] = useState<string[]>([]);
@@ -949,6 +969,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
                 filesChanged: ev.filesChanged ?? [],
                 diffs: ev.diffs ?? [],
                 committing: false,
+                summary: ev.response ?? "",
               });
             }
             setStreamMsg("");
