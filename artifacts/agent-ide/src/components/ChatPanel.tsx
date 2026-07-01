@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Loader2, Send, RotateCcw, Bot, FileCode, Check, Zap, Copy,
   GitCommit, FilePlus, FilePen, FileX, ExternalLink, Paperclip, X, Square,
+  Activity, CheckCircle2, Cpu,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -345,6 +346,65 @@ function SuggestionChips({ suggestions, onPick }: { suggestions: string[]; onPic
 }
 
 /* ------------------------------------------------------------------ */
+/*  Live activity log                                                   */
+/* ------------------------------------------------------------------ */
+
+interface LogEntry {
+  text: string;
+  type: "status" | "turn" | "reading" | "committing";
+}
+
+const LOG_COLORS: Record<LogEntry["type"], string> = {
+  status:     "#6e7681",
+  turn:       "#e5c07b",
+  reading:    "#61afef",
+  committing: "#d19a66",
+};
+
+function LiveActivity({ log, status }: { log: LogEntry[]; status: AgentStatus }) {
+  if (log.length === 0) return null;
+  return (
+    <div
+      className="w-full max-w-[95%] rounded-lg rounded-tl-sm overflow-hidden"
+      style={{ background: "#161b22", border: "1px solid #21262d" }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center gap-2 px-3 py-2"
+        style={{ borderBottom: "1px solid #21262d", background: "#0d1117" }}
+      >
+        <Activity className="w-3 h-3" style={{ color: "#3fb950" }} />
+        <span style={{ fontFamily: SANS, fontSize: 10, fontWeight: 600, color: "#3fb950", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          Agent en cours
+        </span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Loader2 className="w-3 h-3 animate-spin" style={{ color: LOG_COLORS[status === "reading" ? "reading" : status === "writing" ? "committing" : "turn"] }} />
+        </div>
+      </div>
+
+      {/* Log entries */}
+      <div className="px-3 py-2 space-y-1">
+        {log.map((entry, i) => {
+          const isLast = i === log.length - 1;
+          const color = LOG_COLORS[entry.type];
+          return (
+            <div key={i} className="flex items-start gap-2">
+              {isLast
+                ? <Loader2 className="w-3 h-3 mt-0.5 animate-spin shrink-0" style={{ color }} />
+                : <CheckCircle2 className="w-3 h-3 mt-0.5 shrink-0" style={{ color: "#3fb950" }} />
+              }
+              <span style={{ fontFamily: SANS, fontSize: 11.5, color: isLast ? color : "#8b949e", lineHeight: 1.5 }}>
+                {entry.text}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Agent result card                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -355,12 +415,27 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
   return (
     <div className="group w-full max-w-[95%]">
       <div className="rounded-lg rounded-tl-sm overflow-hidden" style={{ background: "#161b22", border: "1px solid #21262d" }}>
+
+        {/* Model badge header */}
+        {msg.model && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5"
+            style={{ borderBottom: "1px solid #21262d", background: "#0d1117" }}
+          >
+            <Cpu className="w-3 h-3" style={{ color: "#61afef" }} />
+            <span style={{ fontFamily: MONO, fontSize: 10, color: "#61afef" }}>
+              {msg.model}
+            </span>
+          </div>
+        )}
+
         <div className="px-3 pt-3 pb-2">
           <MarkdownContent content={msg.content} />
         </div>
 
         {hasChanges && (
           <div style={{ borderTop: "1px solid #21262d", background: "#0d1117", padding: "8px 12px" }}>
+            {/* Commit headline */}
             <div className="flex items-center gap-2 mb-2">
               <GitCommit className="w-3.5 h-3.5" style={{ color: "#3fb950" }} />
               <span style={{ fontFamily: SANS, fontSize: 11, fontWeight: 600, color: "#3fb950", textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -380,6 +455,7 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
               )}
             </div>
 
+            {/* File diff table */}
             <div className="space-y-0.5">
               {msg.filesChanged!.map((f) => {
                 const diff = msg.diffs?.find((d) => d.path === f);
@@ -387,10 +463,20 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
               })}
             </div>
 
+            {/* Commit SHA + deploy note */}
             {msg.commitSha && (
-              <div className="mt-2" style={{ fontFamily: MONO, fontSize: 10.5, color: "#6e7681" }}>
-                commit <span style={{ color: "#8b949e" }}>{msg.commitSha.slice(0, 7)}</span>
-                <span style={{ fontFamily: SANS, marginLeft: 4 }}>— Render redéployera automatiquement</span>
+              <div
+                className="mt-2.5 flex items-center gap-2 rounded px-2 py-1.5"
+                style={{ background: "#161b22", border: "1px solid #21262d" }}
+              >
+                <CheckCircle2 className="w-3 h-3 shrink-0" style={{ color: "#3fb950" }} />
+                <div style={{ fontFamily: MONO, fontSize: 10.5 }}>
+                  <span style={{ color: "#6e7681" }}>commit </span>
+                  <span style={{ color: "#e6edf3", fontWeight: 600 }}>{msg.commitSha.slice(0, 7)}</span>
+                  <span style={{ fontFamily: SANS, color: "#6e7681", marginLeft: 6 }}>
+                    — Render redéploiera automatiquement ✓
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -468,6 +554,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<AgentStatus>("idle");
   const [streamMsg, setStreamMsg] = useState<string>("");
+  const [progressLog, setProgressLog] = useState<LogEntry[]>([]);
   const [isPending, setIsPending] = useState(false);
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelChoice>("auto");
@@ -670,6 +757,8 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
 
           if (ev.type === "status" || ev.type === "turn" || ev.type === "reading" || ev.type === "committing") {
             setStreamMsg(ev.message ?? "");
+            const entryType = ev.type as LogEntry["type"];
+            setProgressLog(prev => [...prev, { text: ev.message ?? "", type: entryType }]);
             if (ev.type === "reading") setStatus("reading");
             else if (ev.type === "committing") setStatus("writing");
             else setStatus("thinking");
@@ -687,6 +776,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               suggestions: ev.suggestions ?? [],
             }]);
             setStreamMsg("");
+            setProgressLog([]);
             setIsPending(false);
             if (hasChanges && onAgentCommit) onAgentCommit();
             return;
@@ -701,6 +791,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
       if ((e as { name?: string })?.name === "AbortError") return;
       const msg = e instanceof Error ? e.message : "Erreur de l'agent";
       setStatus("error");
+      setProgressLog([]);
       setTimeout(() => setStatus("idle"), 4000);
       setMessages(prev => [...prev, { role: "agent", content: `❌ **Erreur :** ${msg}`, filesChanged: [] }]);
     } finally {
@@ -828,25 +919,25 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           )
         )}
 
-        {/* Live status */}
+        {/* Live activity log */}
         {isPending && (
           <div className="flex items-start gap-2">
-            <div
-              className="w-full max-w-[95%] rounded-lg rounded-tl-sm px-3 py-2.5"
-              style={{ background: "#161b22", border: "1px solid #21262d" }}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Loader2 className="w-3 h-3 animate-spin" style={{ color: STATUS_COLORS[status] }} />
-                <span style={{ fontFamily: MONO, fontSize: 10, color: STATUS_COLORS[status], fontWeight: 600 }}>
-                  {STATUS_LABELS[status]}
-                </span>
-              </div>
-              {streamMsg && (
-                <span style={{ fontFamily: SANS, fontSize: 11.5, color: "#6e7681", display: "block" }}>
-                  {streamMsg}
-                </span>
-              )}
-            </div>
+            {progressLog.length > 0
+              ? <LiveActivity log={progressLog} status={status} />
+              : (
+                <div
+                  className="w-full max-w-[95%] rounded-lg rounded-tl-sm px-3 py-2.5"
+                  style={{ background: "#161b22", border: "1px solid #21262d" }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin" style={{ color: STATUS_COLORS[status] }} />
+                    <span style={{ fontFamily: SANS, fontSize: 11.5, color: STATUS_COLORS[status] }}>
+                      {STATUS_LABELS[status]}
+                    </span>
+                  </div>
+                </div>
+              )
+            }
           </div>
         )}
       </div>
