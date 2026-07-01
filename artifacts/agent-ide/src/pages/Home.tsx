@@ -72,13 +72,42 @@ function isLikelyBlocked(url: string): boolean {
   } catch { return false; }
 }
 
-function PreviewPanel({ previewUrl, onUrlChange }: { previewUrl: string; onUrlChange: (url: string) => void }) {
+function PreviewPanel({ previewUrl, onUrlChange, agentRefreshKey }: { previewUrl: string; onUrlChange: (url: string) => void; agentRefreshKey?: number }) {
   const [editUrl, setEditUrl] = useState(previewUrl);
   const [liveUrl, setLiveUrl] = useState(previewUrl);
   const [loading, setLoading] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const [deployCountdown, setDeployCountdown] = useState<number | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const blockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Auto-refresh preview after agent commits (with deploy countdown)
+  useEffect(() => {
+    if (!agentRefreshKey || !liveUrl) return;
+    // Immediate reload for local/fast hosts; countdown for Render/Netlify
+    const isSlowHost = /onrender\.com|netlify\.app|vercel\.app/.test(liveUrl);
+    const delay = isSlowHost ? 90 : 5;
+    setDeployCountdown(delay);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownRef.current = setInterval(() => {
+      setDeployCountdown((c) => {
+        if (c === null || c <= 1) {
+          clearInterval(countdownRef.current!);
+          // Reload the iframe
+          if (iframeRef.current) {
+            setLoading(true);
+            setBlocked(false);
+            iframeRef.current.src = liveUrl + (liveUrl.includes("?") ? "&" : "?") + "_t=" + Date.now();
+          }
+          return null;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentRefreshKey]);
 
   const navigate = (url: string) => {
     let u = url.trim();
@@ -173,6 +202,30 @@ function PreviewPanel({ previewUrl, onUrlChange }: { previewUrl: string; onUrlCh
           </a>
         )}
       </div>
+
+      {/* Deploy countdown banner */}
+      {deployCountdown !== null && (
+        <div style={{
+          padding: "6px 12px", background: "#161b22", borderBottom: "1px solid #21262d",
+          display: "flex", alignItems: "center", gap: 8, fontSize: 12,
+        }}>
+          <RefreshCw style={{ width: 12, height: 12, color: "#58a6ff", flexShrink: 0 }} className="animate-spin" />
+          <span style={{ color: "#8b949e" }}>
+            Agent a modifié des fichiers — rechargement de l'aperçu dans
+            <strong style={{ color: "#c9d1d9", marginLeft: 4 }}>{deployCountdown}s</strong>
+          </span>
+          <button
+            onClick={() => {
+              if (countdownRef.current) clearInterval(countdownRef.current);
+              setDeployCountdown(null);
+              if (iframeRef.current && liveUrl) { setLoading(true); iframeRef.current.src = liveUrl; }
+            }}
+            style={{ marginLeft: "auto", fontSize: 11, color: "#58a6ff", background: "none", border: "none", cursor: "pointer" }}
+          >
+            Recharger maintenant
+          </button>
+        </div>
+      )}
 
       {/* Blocked overlay */}
       {blocked && liveUrl && (
@@ -590,7 +643,7 @@ export function Home() {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {showPreview ? (
-          <PreviewPanel previewUrl={previewUrl} onUrlChange={handlePreviewUrlChange} />
+          <PreviewPanel previewUrl={previewUrl} onUrlChange={handlePreviewUrlChange} agentRefreshKey={agentRefreshKey} />
         ) : currentPath ? (
           <Editor
             ref={editorRef}
@@ -600,6 +653,7 @@ export function Home() {
             onApplied={() => setAppliedCode(null)}
             onDirtyChange={setEditorIsDirty}
             onSavingChange={setEditorIsSaving}
+            agentRefreshKey={agentRefreshKey}
           />
         ) : (
           <WelcomeScreen repo={repo} onSearch={() => setShowSearch(true)} isMobile={isMobile} />
@@ -782,7 +836,7 @@ export function Home() {
           )}
           {mobileTab === "preview" && (
             <div className="flex-1 overflow-hidden flex flex-col" style={{ background: "#0d1117" }}>
-              <PreviewPanel previewUrl={previewUrl} onUrlChange={handlePreviewUrlChange} />
+              <PreviewPanel previewUrl={previewUrl} onUrlChange={handlePreviewUrlChange} agentRefreshKey={agentRefreshKey} />
             </div>
           )}
 
