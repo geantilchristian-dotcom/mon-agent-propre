@@ -6,10 +6,12 @@ import { FileSearch } from "@/components/FileSearch";
 import { useConfigureGithub } from "@workspace/api-client-react";
 import {
   GitBranch, Upload, Loader2, X, FileCode, Bot,
-  FolderOpen, Code2, MessageSquare, Search,
+  FolderOpen, Code2, MessageSquare, Search, Monitor,
+  RefreshCw, ExternalLink, Globe,
 } from "lucide-react";
 
 const STORAGE_KEY = "agent-ide-github-config";
+const PREVIEW_URL_KEY = "agent-ide-preview-url";
 
 /* ------------------------------------------------------------------ */
 /*  Mobile detection hook                                               */
@@ -41,6 +43,123 @@ function getFileIcon(name: string): { icon: string; color: string } {
     sh:   { icon: "$", color: "#3FB950" },   py:   { icon: "Py", color: "#3572A5" },
   };
   return map[ext] ?? { icon: "·", color: "#8b949e" };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Preview panel                                                       */
+/* ------------------------------------------------------------------ */
+
+function PreviewPanel({ previewUrl, onUrlChange }: { previewUrl: string; onUrlChange: (url: string) => void }) {
+  const [editUrl, setEditUrl] = useState(previewUrl);
+  const [liveUrl, setLiveUrl] = useState(previewUrl);
+  const [loading, setLoading] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const navigate = (url: string) => {
+    let u = url.trim();
+    if (u && !u.startsWith("http")) u = "https://" + u;
+    setLiveUrl(u);
+    onUrlChange(u);
+    setEditUrl(u);
+    setLoading(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); navigate(editUrl); };
+
+  const handleRefresh = () => {
+    if (iframeRef.current && liveUrl) {
+      setLoading(true);
+      iframeRef.current.src = liveUrl;
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "#0d1117" }}>
+      {/* URL bar */}
+      <div
+        className="flex items-center gap-2 shrink-0 px-2"
+        style={{ height: 36, borderBottom: "1px solid #21262d", background: "#010409" }}
+      >
+        <Globe style={{ width: 13, height: 13, color: "#6e7681", flexShrink: 0 }} />
+
+        <form onSubmit={handleSubmit} style={{ flex: 1, display: "flex" }}>
+          <input
+            value={editUrl}
+            onChange={(e) => setEditUrl(e.target.value)}
+            placeholder="https://votre-app.onrender.com"
+            style={{
+              flex: 1, background: "#161b22", border: "1px solid #21262d",
+              borderRadius: 5, padding: "3px 8px", fontSize: 11.5,
+              fontFamily: "'JetBrains Mono', monospace", color: "#c9d1d9",
+              outline: "none",
+            }}
+            onFocus={(e) => (e.currentTarget.style.borderColor = "#388bfd")}
+            onBlur={(e) => (e.currentTarget.style.borderColor = "#21262d")}
+          />
+        </form>
+
+        <button
+          onClick={handleRefresh}
+          disabled={!liveUrl}
+          title="Actualiser"
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 26, height: 26, borderRadius: 5, border: "1px solid #21262d",
+            background: "transparent", cursor: liveUrl ? "pointer" : "not-allowed",
+            color: liveUrl ? "#8b949e" : "#3d444d",
+          }}
+        >
+          <RefreshCw style={{ width: 12, height: 12 }} className={loading ? "animate-spin" : ""} />
+        </button>
+
+        {liveUrl && (
+          <a
+            href={liveUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Ouvrir dans un nouvel onglet"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: 26, height: 26, borderRadius: 5, border: "1px solid #21262d",
+              background: "transparent", color: "#8b949e", textDecoration: "none",
+            }}
+          >
+            <ExternalLink style={{ width: 12, height: 12 }} />
+          </a>
+        )}
+      </div>
+
+      {/* Iframe or empty state */}
+      {liveUrl ? (
+        <iframe
+          ref={iframeRef}
+          src={liveUrl}
+          title="Aperçu de l'application"
+          onLoad={() => setLoading(false)}
+          style={{ flex: 1, border: "none", background: "#ffffff" }}
+          allow="clipboard-read; clipboard-write"
+        />
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <div
+            style={{
+              width: 48, height: 48, borderRadius: 12,
+              background: "#161b22", border: "1px solid #21262d",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <Monitor style={{ width: 22, height: 22, color: "#3d444d" }} />
+          </div>
+          <p style={{ fontSize: 12.5, color: "#6e7681", lineHeight: 1.6, fontFamily: "'Inter', sans-serif", maxWidth: 260 }}>
+            Entrez l'URL de votre application dans la barre ci-dessus pour l'aperçu en direct.
+          </p>
+          <p style={{ fontSize: 11, color: "#3d444d", fontFamily: "'JetBrains Mono', monospace" }}>
+            ex: https://mon-app.onrender.com
+          </p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -150,7 +269,7 @@ function WelcomeScreen({ repo, onSearch, isMobile }: {
 /*  Home                                                                */
 /* ------------------------------------------------------------------ */
 
-type MobileTab = "files" | "editor" | "chat";
+type MobileTab = "files" | "editor" | "chat" | "preview";
 
 export function Home() {
   const isMobile = useIsMobile();
@@ -165,6 +284,15 @@ export function Home() {
   const [banner, setBanner] = useState<{ text: string; ok: boolean } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [agentRefreshKey, setAgentRefreshKey] = useState(0);
+  const [previewUrl, setPreviewUrl] = useState(() => {
+    try { return localStorage.getItem(PREVIEW_URL_KEY) ?? ""; } catch { return ""; }
+  });
+  const [showPreview, setShowPreview] = useState(false);
+
+  const handlePreviewUrlChange = (url: string) => {
+    setPreviewUrl(url);
+    try { localStorage.setItem(PREVIEW_URL_KEY, url); } catch { /* ignore */ }
+  };
 
   const editorRef = useRef<EditorHandle>(null);
   const configureMutation = useConfigureGithub();
@@ -287,46 +415,78 @@ export function Home() {
 
   const editorPanel = (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{ height: "100%" }}>
-      {openTabs.length > 0 && (
-        <div
-          className="flex items-stretch shrink-0 overflow-x-auto"
-          style={{ height: 36, background: "#010409", borderBottom: "1px solid #21262d" }}
-        >
-          {openTabs.map(tab => {
-            const name = tab.split("/").pop() ?? tab;
-            const { icon, color } = getFileIcon(name);
-            const isActive = currentPath === tab;
-            return (
-              <button
-                key={tab}
-                onClick={() => setCurrentPath(tab)}
-                title={tab}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "0 14px", borderRight: "1px solid #21262d",
-                  fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
-                  color: isActive ? "#c9d1d9" : "#8b949e",
-                  background: isActive ? "#0d1117" : "transparent",
-                  borderBottom: isActive ? "2px solid #61afef" : "none",
-                  fontFamily: "'JetBrains Mono', monospace",
-                }}
+      {/* Tab bar — file tabs + preview tab */}
+      <div
+        className="flex items-stretch shrink-0 overflow-x-auto"
+        style={{ height: 36, background: "#010409", borderBottom: "1px solid #21262d" }}
+      >
+        {openTabs.map(tab => {
+          const name = tab.split("/").pop() ?? tab;
+          const { icon, color } = getFileIcon(name);
+          const isActive = !showPreview && currentPath === tab;
+          return (
+            <button
+              key={tab}
+              onClick={() => { setCurrentPath(tab); setShowPreview(false); }}
+              title={tab}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "0 14px", borderRight: "1px solid #21262d",
+                fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap",
+                color: isActive ? "#c9d1d9" : "#8b949e",
+                background: isActive ? "#0d1117" : "transparent",
+                borderBottom: isActive ? "2px solid #61afef" : "none",
+                fontFamily: "'JetBrains Mono', monospace",
+              }}
+            >
+              <span style={{ color, fontSize: 11, fontFamily: "sans-serif" }}>{icon}</span>
+              <span>{name}</span>
+              <span
+                onClick={(e) => handleCloseTab(e, tab)}
+                title="Fermer"
+                style={{ marginLeft: 2, color: "#6e7681", display: "flex", alignItems: "center" }}
               >
-                <span style={{ color, fontSize: 11, fontFamily: "sans-serif" }}>{icon}</span>
-                <span>{name}</span>
-                <span
-                  onClick={(e) => handleCloseTab(e, tab)}
-                  title="Fermer"
-                  style={{ marginLeft: 2, color: "#6e7681", display: "flex", alignItems: "center" }}
-                >
-                  <X style={{ width: 12, height: 12 }} />
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+                <X style={{ width: 12, height: 12 }} />
+              </span>
+            </button>
+          );
+        })}
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Preview tab */}
+        <button
+          onClick={() => setShowPreview(v => !v)}
+          title="Aperçu de l'application"
+          style={{
+            display: "flex", alignItems: "center", gap: 5,
+            padding: "0 14px", borderLeft: "1px solid #21262d",
+            fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
+            color: showPreview ? "#3fb950" : "#6e7681",
+            background: showPreview ? "#0d1117" : "transparent",
+            borderBottom: showPreview ? "2px solid #3fb950" : "none",
+            fontFamily: "'Inter', sans-serif", flexShrink: 0,
+          }}
+        >
+          <Monitor style={{ width: 13, height: 13 }} />
+          <span>Aperçu</span>
+          {previewUrl && (
+            <span style={{
+              marginLeft: 4, fontSize: 10, background: "#1a4a2e",
+              color: "#3fb950", border: "1px solid #1f6a3a",
+              borderRadius: 4, padding: "0px 5px",
+            }}>
+              Live
+            </span>
+          )}
+        </button>
+      </div>
+
       <div className="flex-1 flex flex-col overflow-hidden">
-        {currentPath ? (
+        {showPreview ? (
+          <PreviewPanel previewUrl={previewUrl} onUrlChange={handlePreviewUrlChange} />
+        ) : currentPath ? (
           <Editor
             ref={editorRef}
             currentPath={currentPath}
@@ -513,6 +673,11 @@ export function Home() {
               {chatPanel}
             </div>
           )}
+          {mobileTab === "preview" && (
+            <div className="flex-1 overflow-hidden flex flex-col" style={{ background: "#0d1117" }}>
+              <PreviewPanel previewUrl={previewUrl} onUrlChange={handlePreviewUrlChange} />
+            </div>
+          )}
 
           {/* Bottom tab bar */}
           <div
@@ -525,12 +690,14 @@ export function Home() {
           >
             {(
               [
-                { id: "files",  Icon: FolderOpen,     label: "Fichiers" },
-                { id: "editor", Icon: Code2,           label: "Éditeur" },
-                { id: "chat",   Icon: MessageSquare,   label: "Agent" },
+                { id: "files",   Icon: FolderOpen,   label: "Fichiers" },
+                { id: "editor",  Icon: Code2,         label: "Éditeur" },
+                { id: "preview", Icon: Monitor,       label: "Aperçu" },
+                { id: "chat",    Icon: MessageSquare, label: "Agent" },
               ] as const
             ).map(({ id, Icon, label }) => {
               const active = mobileTab === id;
+              const isPreview = id === "preview";
               return (
                 <button
                   key={id}
@@ -540,8 +707,12 @@ export function Home() {
                     alignItems: "center", justifyContent: "center", gap: 3,
                     background: "transparent", cursor: "pointer",
                     border: "none",
-                    borderTop: active ? "2px solid #61afef" : "2px solid transparent",
-                    color: active ? "#61afef" : "#6e7681",
+                    borderTop: active
+                      ? `2px solid ${isPreview ? "#3fb950" : "#61afef"}`
+                      : "2px solid transparent",
+                    color: active
+                      ? (isPreview ? "#3fb950" : "#61afef")
+                      : "#6e7681",
                     transition: "color 0.15s, border-color 0.15s",
                   }}
                 >
