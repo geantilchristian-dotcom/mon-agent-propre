@@ -195,9 +195,8 @@ async function callGroq(
   const textModels = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
-    "mixtral-8x7b-32768",
+    "llama-3.2-3b-preview",
+    "llama-3.2-1b-preview",
   ];
 
   const buildMessages = (model: string) => messages.map((m, i) => {
@@ -248,11 +247,10 @@ async function callGemini(
   image?: ImageCtx
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
   const geminiModels = [
+    "gemini-2.5-flash",
     "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-pro",
   ];
 
   const userParts: object[] = [{ text: userMessage }];
