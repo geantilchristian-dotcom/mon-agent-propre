@@ -717,16 +717,14 @@ export function Home() {
           borderBottom: "1px solid #21262d",
         }}
       >
-        {/* macOS dots — desktop only */}
+        {/* Logo */}
+        <img
+          src="/logo.png"
+          alt="Elianex Code"
+          style={{ height: isMobile ? 28 : 26, width: "auto", objectFit: "contain", flexShrink: 0 }}
+        />
         {!isMobile && (
-          <>
-            <div className="flex items-center gap-1.5">
-              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#ff5f57" }} />
-              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#febc2e" }} />
-              <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#28c840" }} />
-            </div>
-            <div style={{ width: 1, height: 20, background: "#21262d" }} />
-          </>
+          <div style={{ width: 1, height: 20, background: "#21262d" }} />
         )}
 
         {/* Branch + repo badge */}
