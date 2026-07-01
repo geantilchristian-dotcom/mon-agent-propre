@@ -486,6 +486,50 @@ async function callLLM(
     return null;
   };
 
+  // OpenRouter vision-capable models (multimodal)
+  const tryOpenRouterVision = async () => {
+    if (!openrouterKey) return null;
+    const visionModels = [
+      "qwen/qwen2.5-vl-72b-instruct:free",
+      "qwen/qwen2.5-vl-7b-instruct:free",
+      "meta-llama/llama-4-scout:free",
+      "meta-llama/llama-4-maverick:free",
+      "google/gemma-3-27b-it:free",
+    ];
+    const lastErrors: string[] = [];
+    for (const model of visionModels) {
+      const oaiMessages = messages.map((m, i) => {
+        if (image && m.role === "user" && i === messages.findIndex((x) => x.role === "user")) {
+          return { role: m.role, content: [
+            { type: "text" as const, text: m.content },
+            { type: "image_url" as const, image_url: { url: `data:${image.mime};base64,${image.base64}` } },
+          ]};
+        }
+        return m;
+      });
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openrouterKey}`,
+          "HTTP-Referer": "https://mon-agent-propre.onrender.com",
+          "X-Title": "Agent IDE",
+        },
+        body: JSON.stringify({ model, messages: oaiMessages, max_tokens: 8192, temperature: 0.2 }),
+      });
+      if (res.ok) {
+        const d = (await res.json()) as { choices: { message: { content: string } }[] };
+        const text = d.choices[0]?.message?.content ?? "";
+        if (text) return { text, model: `OpenRouter Vision · ${model.split("/").pop()?.replace(":free", "") ?? model}` };
+      }
+      const body = await res.text().catch(() => "");
+      lastErrors.push(`${model.split("/").pop()} ${res.status}: ${body.slice(0, 60)}`);
+      if (res.status === 401) break;
+    }
+    errors.push(`OpenRouter Vision: ${lastErrors.join(" → ")}`);
+    return null;
+  };
+
   const tryGPT = async () => {
     if (!openaiKey) return null;
     const r = await callOpenAI(openaiKey, messages, image);
@@ -496,7 +540,16 @@ async function callLLM(
 
   let result: { text: string; model: string } | null = null;
 
-  if (preferred === "gpt") {
+  if (image) {
+    // Vision cascade — only vision-capable models, in order of reliability
+    // Gemini = ALL variants support vision (4 fallbacks)
+    // Claude = vision ✓, GPT-4o = vision ✓, Groq Vision = 3 models, OpenRouter = qwen-vl + llama4
+    result = await tryGemini()
+          ?? await tryClaude()
+          ?? await tryGPT()
+          ?? await tryGroq()           // tries llama vision models first
+          ?? await tryOpenRouterVision();
+  } else if (preferred === "gpt") {
     result = await tryGPT() ?? await tryClaude() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
   } else if (preferred === "claude") {
     result = await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
@@ -505,7 +558,7 @@ async function callLLM(
   } else if (preferred === "gemini") {
     result = await tryGemini() ?? await tryClaude() ?? await tryGPT() ?? await tryOpenRouter() ?? await tryGroq();
   } else {
-    // auto: Groq 70b only (skip 8b → 413) → OpenRouter (7 free models) → Gemini → Claude → GPT
+    // auto: Groq 70b only (skip 8b → 413) → OpenRouter (12 free models) → Gemini → Claude → GPT
     result = await tryGroq(true) ?? await tryOpenRouter() ?? await tryGemini() ?? await tryClaude() ?? await tryGPT();
   }
 
