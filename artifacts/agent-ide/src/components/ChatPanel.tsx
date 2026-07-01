@@ -646,6 +646,10 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
   const [atQuery, setAtQuery] = useState<string | null>(null);
   const [atDropdownIdx, setAtDropdownIdx] = useState(0);
 
+  type ProviderStatus = { name: string; ok: boolean; latency: number; error?: string };
+  const [llmHealth, setLlmHealth] = useState<ProviderStatus[] | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -799,9 +803,13 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
     };
 
     try {
+      const agentSecret = (() => { try { return localStorage.getItem("agent-ide-agent-secret") ?? undefined; } catch { return undefined; } })();
       const resp = await fetch("/api/agent/stream", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(agentSecret ? { "x-agent-secret": agentSecret } : {}),
+        },
         body: JSON.stringify({
           message: text || "Analyse cette image et dis-moi ce que tu vois / comment corriger le problème.",
           currentFile: currentPath ?? null,
@@ -811,6 +819,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           history,
           _githubToken: fallbackToken,
           _githubRepo: fallbackRepo,
+          _agentSecret: agentSecret,
           autoCommit: !confirmPush,
         }),
         signal: controller.signal,
@@ -900,10 +909,14 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
     if (!pendingCommit) return;
     setPendingCommit(prev => prev ? { ...prev, committing: true } : null);
     try {
+      const agentSecret2 = (() => { try { return localStorage.getItem("agent-ide-agent-secret") ?? undefined; } catch { return undefined; } })();
       const res = await fetch("/api/agent/commit-staged", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stagedId: pendingCommit.stagedId }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(agentSecret2 ? { "x-agent-secret": agentSecret2 } : {}),
+        },
+        body: JSON.stringify({ stagedId: pendingCommit.stagedId, _agentSecret: agentSecret2 }),
       });
       const data = await res.json() as { commitSha?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -1108,12 +1121,50 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
 
       {/* ── Status bar ── */}
       <div
-        className="shrink-0 flex items-center px-3"
+        className="shrink-0 flex items-center justify-between px-3"
         style={{ height: 20, borderTop: "1px solid #21262d", background: "#0d1117" }}
       >
         <span style={{ fontFamily: MONO, fontSize: 9.5, color: STATUS_COLORS[status] }}>
           ● {STATUS_LABELS[status]}
         </span>
+        {/* LLM health badge */}
+        <button
+          onClick={async () => {
+            if (healthLoading) return;
+            setHealthLoading(true);
+            try {
+              const r = await fetch("/api/agent/health");
+              const d = await r.json() as { providers: ProviderStatus[] };
+              setLlmHealth(d.providers);
+            } catch { setLlmHealth(null); }
+            finally { setHealthLoading(false); }
+          }}
+          title="Vérifier le statut des APIs IA"
+          style={{
+            display: "flex", alignItems: "center", gap: 4, background: "none",
+            border: "none", cursor: "pointer", padding: "0 2px",
+          }}
+        >
+          {healthLoading ? (
+            <Loader2 style={{ width: 8, height: 8, color: "#6e7681" }} className="animate-spin" />
+          ) : llmHealth ? (
+            <>
+              {llmHealth.map((p) => (
+                <span
+                  key={p.name}
+                  title={p.ok ? `${p.name} ✓ ${p.latency}ms` : `${p.name} ✗ ${p.error ?? ""}`}
+                  style={{
+                    width: 6, height: 6, borderRadius: "50%",
+                    background: p.error === "Clé non configurée" ? "#3d444d" : p.ok ? "#3fb950" : "#f85149",
+                    display: "inline-block",
+                  }}
+                />
+              ))}
+            </>
+          ) : (
+            <span style={{ fontFamily: MONO, fontSize: 9, color: "#3d444d" }}>IA ?</span>
+          )}
+        </button>
       </div>
 
       {/* ── Input area ── */}
@@ -1177,11 +1228,11 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               placeholder={repo ? "Message (↵ envoyer, ⇧↵ saut de ligne, @ fichier)" : "Connectez d'abord un dépôt…"}
               disabled={isPending}
               rows={1}
-              className="resize-none text-sm leading-relaxed pr-8"
+              className="resize-none text-xs leading-relaxed pr-8"
               style={{
-                fontFamily: SANS, fontSize: 14,
-                background: "white", border: "1px solid #ccc",
-                borderRadius: 8, color: "black",
+                fontFamily: SANS, fontSize: 12.5,
+                background: "#0d1117", border: "1px solid #21262d",
+                borderRadius: 8, color: "#c9d1d9",
                 minHeight: 36, maxHeight: 120,
                 padding: "8px 32px 8px 10px",
               }}
@@ -1191,7 +1242,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               title="Joindre une image"
               style={{
                 position: "absolute", right: 6, bottom: 7,
-                color: "#666", background: "none", border: "none", cursor: "pointer",
+                color: "#6e7681", background: "none", border: "none", cursor: "pointer",
               }}
             >
               <Paperclip style={{ width: 13, height: 13 }} />

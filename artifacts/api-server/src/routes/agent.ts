@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { Octokit } from "octokit";
 import { RunAgentBody } from "@workspace/api-zod";
 
@@ -981,11 +981,91 @@ function parseAgentRequest(body: unknown):
 }
 
 /* ------------------------------------------------------------------ */
+/*  API abuse protection middleware                                     */
+/* ------------------------------------------------------------------ */
+
+const AGENT_SECRET = process.env["AGENT_SECRET"] ?? null;
+
+function requireSecret(req: Request, res: Response, next: NextFunction): void {
+  if (!AGENT_SECRET) { next(); return; }
+  const header = req.headers["x-agent-secret"];
+  const body = (req.body as Record<string, unknown>)?.["_agentSecret"];
+  if (header === AGENT_SECRET || body === AGENT_SECRET) { next(); return; }
+  res.status(401).json({ error: "Non autorisé — clé API manquante." });
+}
+
+/* ------------------------------------------------------------------ */
+/*  LLM health-check endpoint                                          */
+/* ------------------------------------------------------------------ */
+
+router.get("/agent/health", async (_req, res) => {
+  const groqKey    = process.env["GROQ_API_KEY"];
+  const geminiKey  = process.env["GEMINI_API_KEY"];
+  const openaiKey  = process.env["OPENAI_API_KEY"];
+  const openrouterKey = process.env["OPENROUTER_KEY"];
+  const claudeKey  = process.env["ANTHROPIC_API_KEY"];
+
+  type FetchResult = { status: number; ok: boolean };
+  const ping = async (name: string, fn: () => Promise<FetchResult>): Promise<{ name: string; ok: boolean; latency: number; error?: string }> => {
+    if (!({ groq: groqKey, gemini: geminiKey, gpt: openaiKey, openrouter: openrouterKey, claude: claudeKey } as Record<string, string | undefined>)[name]) {
+      return { name, ok: false, latency: 0, error: "Clé non configurée" };
+    }
+    const t0 = Date.now();
+    try {
+      const r = await fn();
+      const latency = Date.now() - t0;
+      if (r.status === 401 || r.status === 403) return { name, ok: false, latency, error: `Clé invalide (${r.status})` };
+      if (r.status === 429) return { name, ok: false, latency, error: "Quota épuisé (429)" };
+      return { name, ok: r.ok, latency, error: r.ok ? undefined : `HTTP ${r.status}` };
+    } catch (e) {
+      return { name, ok: false, latency: Date.now() - t0, error: String(e) };
+    }
+  };
+
+  const doFetch = (url: string, init: RequestInit): Promise<FetchResult> =>
+    (globalThis.fetch(url, init) as Promise<{ status: number; ok: boolean }>);
+
+  const results = await Promise.all([
+    ping("groq", () => doFetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${groqKey}` },
+      body: JSON.stringify({ model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+    })),
+    ping("gemini", () => doFetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "hi" }] }], generationConfig: { maxOutputTokens: 1 } }),
+      }
+    )),
+    ping("gpt", () => doFetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${openaiKey}` },
+      body: JSON.stringify({ model: "gpt-4o-mini", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+    })),
+    ping("openrouter", () => doFetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${openrouterKey}`, "HTTP-Referer": "https://mon-agent-propre.onrender.com" },
+      body: JSON.stringify({ model: "meta-llama/llama-3.3-70b-instruct:free", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+    })),
+    ping("claude", () => doFetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": claudeKey!, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: "claude-3-5-sonnet-20241022", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
+    })),
+  ]);
+
+  const anyOk = results.some((r) => r.ok);
+  res.status(anyOk ? 200 : 503).json({ providers: results, anyAvailable: anyOk });
+});
+
+/* ------------------------------------------------------------------ */
 /*  Routes                                                              */
 /* ------------------------------------------------------------------ */
 
 /* JSON route */
-router.post("/agent/run", async (req, res) => {
+router.post("/agent/run", requireSecret, async (req, res) => {
   const ctx = parseAgentRequest(req.body);
   if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
   const autoCommit = (req.body as Record<string, unknown>)["autoCommit"] !== false;
@@ -1001,7 +1081,7 @@ router.post("/agent/run", async (req, res) => {
 });
 
 /* SSE streaming route */
-router.post("/agent/stream", async (req, res) => {
+router.post("/agent/stream", requireSecret, async (req, res) => {
   const ctx = parseAgentRequest(req.body);
   if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
   const autoCommit = (req.body as Record<string, unknown>)["autoCommit"] !== false;
@@ -1027,7 +1107,7 @@ router.post("/agent/stream", async (req, res) => {
 });
 
 /* Confirm staged commit route */
-router.post("/agent/commit-staged", async (req, res) => {
+router.post("/agent/commit-staged", requireSecret, async (req, res) => {
   const { stagedId } = req.body as { stagedId?: string };
   if (!stagedId) { res.status(400).json({ error: "stagedId requis" }); return; }
 
