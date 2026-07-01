@@ -1180,8 +1180,8 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               className="resize-none text-sm leading-relaxed pr-8"
               style={{
                 fontFamily: SANS, fontSize: 14,
-                background: "#0d1117", border: "1px solid #21262d",
-                borderRadius: 8, color: "#c9d1d9",
+                background: "white", border: "1px solid #ccc",
+                borderRadius: 8, color: "black",
                 minHeight: 36, maxHeight: 120,
                 padding: "8px 32px 8px 10px",
               }}
@@ -1191,7 +1191,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               title="Joindre une image"
               style={{
                 position: "absolute", right: 6, bottom: 7,
-                color: "#6e7681", background: "none", border: "none", cursor: "pointer",
+                color: "#666", background: "none", border: "none", cursor: "pointer",
               }}
             >
               <Paperclip style={{ width: 13, height: 13 }} />
