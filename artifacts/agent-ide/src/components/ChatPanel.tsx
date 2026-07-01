@@ -686,7 +686,14 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
 
   useEffect(() => {
     if (!repo) return;
-    try { localStorage.setItem(storageKey, JSON.stringify(messages)); } catch { /* ignore */ }
+    try {
+      /* Strip imageDataUrl before saving — base64 images can exceed the 5 MB
+         localStorage quota and cause silent save failures on every message. */
+      const lean = messages.map((m) =>
+        m.imageDataUrl ? { ...m, imageDataUrl: undefined } : m
+      );
+      localStorage.setItem(storageKey, JSON.stringify(lean));
+    } catch { /* ignore */ }
   }, [messages, repo, storageKey]);
 
   useEffect(() => {
