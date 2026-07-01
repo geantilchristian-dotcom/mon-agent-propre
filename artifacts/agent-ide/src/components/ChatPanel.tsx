@@ -1177,9 +1177,9 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               placeholder={repo ? "Message (↵ envoyer, ⇧↵ saut de ligne, @ fichier)" : "Connectez d'abord un dépôt…"}
               disabled={isPending}
               rows={1}
-              className="resize-none text-xs leading-relaxed pr-8"
+              className="resize-none text-sm leading-relaxed pr-8"
               style={{
-                fontFamily: SANS, fontSize: 12.5,
+                fontFamily: SANS, fontSize: 14,
                 background: "#0d1117", border: "1px solid #21262d",
                 borderRadius: 8, color: "#c9d1d9",
                 minHeight: 36, maxHeight: 120,
