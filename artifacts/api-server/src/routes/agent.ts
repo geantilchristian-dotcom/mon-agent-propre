@@ -8,6 +8,30 @@ let octokit: Octokit | null = null;
 let currentOwner: string | null = null;
 let currentRepo: string | null = null;
 
+/* ------------------------------------------------------------------ */
+/*  Staged commits (confirm-before-push mode)                          */
+/* ------------------------------------------------------------------ */
+
+interface StagedCommit {
+  writes: { path: string; content: string }[];
+  deletes: { path: string }[];
+  kit: Octokit;
+  owner: string;
+  repo: string;
+  message: string;
+  expiresAt: number;
+}
+
+const stagedCommits = new Map<string, StagedCommit>();
+
+/* Expire staged commits older than 30 minutes */
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, sc] of stagedCommits) {
+    if (now > sc.expiresAt) stagedCommits.delete(id);
+  }
+}, 5 * 60 * 1000).unref();
+
 export function setAgentGithub(
   kit: Octokit,
   owner: string,
@@ -499,11 +523,13 @@ CONTENU COMPLET DU FICHIER — jamais de "...", jamais de troncature
 
 ## Règles pour les tâches de code
 
-1. **LIS avant d'écrire** — Ne jamais modifier un fichier sans l'avoir lu
-2. **Contenu intégral** — write_file = fichier complet, zéro ellipse
-3. **Tous les fichiers impactés** — Mets à jour imports, router, navigation
-4. **Imports valides** — Vérifie que chaque import existe
-5. **Même stack** — Respecte les patterns existants` : `## Aucun projet connecté
+1. **LIS avant d'écrire** — Ne jamais modifier un fichier sans l'avoir lu intégralement
+2. **Chirurgical** — Modifie UNIQUEMENT ce qui est demandé. Ne jamais reformater, réindenter, ni réécrire des sections non concernées par la demande
+3. **Scope minimal** — Si la demande concerne un composant, ne touche qu'à ce composant. Ne modifie pas d'autres fichiers sauf si c'est strictement nécessaire (import cassé, type manquant, etc.)
+4. **Contenu intégral** — write_file = fichier complet, zéro ellipse, mais identique à l'original sauf les lignes modifiées
+5. **Tous les fichiers impactés** — Mets à jour imports, router, navigation si et seulement si une modification les casse
+6. **Imports valides** — Vérifie que chaque import existe
+7. **Même stack** — Respecte strictement les patterns, conventions et bibliothèques existants. Ne pas en introduire de nouveaux sans demande explicite` : `## Aucun projet connecté
 Tu peux répondre à toutes les questions générales. Pour des tâches de code sur un dépôt, l'utilisateur doit d'abord connecter un dépôt GitHub via la sidebar.`}
 
 ---
@@ -592,6 +618,7 @@ interface AgentRunResult {
   filesChanged: string[];
   diffs: FileDiff[];
   commitSha: string | null;
+  stagedId: string | null;
   model: string;
   suggestions: string[];
 }
@@ -604,7 +631,8 @@ async function runAgenticLoop(
   repo: string | null,
   input: AgentRunInput,
   keys: { claudeKey?: string; groqKey?: string; geminiKey?: string; openrouterKey?: string },
-  onProgress?: ProgressFn
+  onProgress?: ProgressFn,
+  autoCommit = true
 ): Promise<AgentRunResult> {
   const { message, currentFile, imageBase64, imageMime, history, model } = input;
   const image: ImageCtx | undefined =
@@ -729,14 +757,29 @@ async function runAgenticLoop(
     }),
   ];
 
-  /* 8. Commit */
+  /* 8. Commit or stage */
   let commitSha: string | null = null;
-  if ((writes.length > 0 || deletes.length > 0) && hasGitHub) {
-    onProgress?.({ type: "committing", files: filesChanged, message: `✏️ Commit de ${filesChanged.length} fichier(s)...` });
-    const firstLine = cleanResponse(lastText).split("\n")[0]?.slice(0, 72) ?? message.slice(0, 72);
-    commitSha = await batchCommit(kit!, owner!, repo!, writes, deletes,
-      `feat(agent): ${firstLine}\n\n${filesChanged.map((f) => `- ${f}`).join("\n")}`);
-  } else if ((writes.length > 0 || deletes.length > 0) && !hasGitHub) {
+  let stagedId: string | null = null;
+  const hasChanges = writes.length > 0 || deletes.length > 0;
+  const firstLine = cleanResponse(lastText).split("\n")[0]?.slice(0, 72) ?? message.slice(0, 72);
+  const commitMessage = `feat(agent): ${firstLine}\n\n${filesChanged.map((f) => `- ${f}`).join("\n")}`;
+
+  if (hasChanges && hasGitHub) {
+    if (autoCommit) {
+      onProgress?.({ type: "committing", files: filesChanged, message: `✏️ Commit de ${filesChanged.length} fichier(s)...` });
+      commitSha = await batchCommit(kit!, owner!, repo!, writes, deletes, commitMessage);
+    } else {
+      /* Stage for user confirmation */
+      stagedId = crypto.randomUUID();
+      stagedCommits.set(stagedId, {
+        writes, deletes,
+        kit: kit!, owner: owner!, repo: repo!,
+        message: commitMessage,
+        expiresAt: Date.now() + 30 * 60 * 1000,
+      });
+      onProgress?.({ type: "staged", files: filesChanged, message: `⏳ ${filesChanged.length} fichier(s) prêts — en attente de confirmation.` });
+    }
+  } else if (hasChanges && !hasGitHub) {
     onProgress?.({ type: "status", message: "⚠️ GitHub non connecté — les modifications ne peuvent pas être commitées." });
   }
 
@@ -745,6 +788,7 @@ async function runAgenticLoop(
     filesChanged,
     diffs,
     commitSha,
+    stagedId,
     model: `${modelName} (${turnCount} tour${turnCount > 1 ? "s" : ""})`,
     suggestions: parseSuggestions(lastText),
   };
@@ -802,9 +846,10 @@ function parseAgentRequest(body: unknown):
 router.post("/agent/run", async (req, res) => {
   const ctx = parseAgentRequest(req.body);
   if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
+  const autoCommit = (req.body as Record<string, unknown>)["autoCommit"] !== false;
 
   try {
-    const result = await runAgenticLoop(ctx.kit, ctx.owner, ctx.repo, ctx.input, ctx.keys);
+    const result = await runAgenticLoop(ctx.kit, ctx.owner, ctx.repo, ctx.input, ctx.keys, undefined, autoCommit);
     res.json(result);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -817,6 +862,7 @@ router.post("/agent/run", async (req, res) => {
 router.post("/agent/stream", async (req, res) => {
   const ctx = parseAgentRequest(req.body);
   if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
+  const autoCommit = (req.body as Record<string, unknown>)["autoCommit"] !== false;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -827,7 +873,7 @@ router.post("/agent/stream", async (req, res) => {
   const send = (data: Record<string, unknown>) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
   try {
-    const result = await runAgenticLoop(ctx.kit, ctx.owner, ctx.repo, ctx.input, ctx.keys, send);
+    const result = await runAgenticLoop(ctx.kit, ctx.owner, ctx.repo, ctx.input, ctx.keys, send, autoCommit);
     send({ type: "done", ...result });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -835,6 +881,25 @@ router.post("/agent/stream", async (req, res) => {
     send({ type: "error", message: msg });
   } finally {
     res.end();
+  }
+});
+
+/* Confirm staged commit route */
+router.post("/agent/commit-staged", async (req, res) => {
+  const { stagedId } = req.body as { stagedId?: string };
+  if (!stagedId) { res.status(400).json({ error: "stagedId requis" }); return; }
+
+  const staged = stagedCommits.get(stagedId);
+  if (!staged) { res.status(404).json({ error: "Staged commit introuvable ou expiré (30 min max)" }); return; }
+
+  stagedCommits.delete(stagedId);
+  try {
+    const commitSha = await batchCommit(staged.kit, staged.owner, staged.repo, staged.writes, staged.deletes, staged.message);
+    res.json({ commitSha });
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    req.log.error({ err: e }, "Staged commit error");
+    res.status(500).json({ error: msg });
   }
 });
 

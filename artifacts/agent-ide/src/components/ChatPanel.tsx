@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Loader2, Send, RotateCcw, Bot, FileCode, Check, Zap, Copy,
   GitCommit, FilePlus, FilePen, FileX, ExternalLink, Paperclip, X, Square,
-  Activity, CheckCircle2, Cpu,
+  Activity, CheckCircle2, Cpu, ShieldCheck, CloudUpload, Ban,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -501,6 +501,82 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
 }
 
 /* ------------------------------------------------------------------ */
+/*  Pending commit confirmation card                                    */
+/* ------------------------------------------------------------------ */
+
+function PendingCommitCard({
+  pending,
+  onCommit,
+  onCancel,
+}: {
+  pending: { filesChanged: string[]; diffs: FileDiff[]; committing: boolean };
+  onCommit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="w-full max-w-[95%] rounded-lg rounded-tl-sm overflow-hidden"
+      style={{ background: "#161b22", border: "1px solid #e3b341" }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center gap-2 px-3 py-2"
+        style={{ borderBottom: "1px solid #e3b341", background: "#2d2100" }}
+      >
+        <ShieldCheck className="w-3.5 h-3.5" style={{ color: "#e3b341" }} />
+        <span style={{ fontFamily: SANS, fontSize: 11, fontWeight: 600, color: "#e3b341", flex: 1 }}>
+          {pending.filesChanged.length} fichier{pending.filesChanged.length > 1 ? "s" : ""} prêt{pending.filesChanged.length > 1 ? "s" : ""} — Voulez-vous pousser sur GitHub ?
+        </span>
+      </div>
+
+      {/* File list */}
+      <div className="px-3 py-2 space-y-0.5">
+        {pending.filesChanged.map((f) => {
+          const diff = pending.diffs.find((d) => d.path === f);
+          return <FileChangeBadge key={f} path={f} diff={diff} />;
+        })}
+      </div>
+
+      {/* Action buttons */}
+      <div
+        className="flex gap-2 px-3 py-2.5"
+        style={{ borderTop: "1px solid #21262d" }}
+      >
+        <button
+          onClick={onCommit}
+          disabled={pending.committing}
+          style={{
+            flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            padding: "6px 0", borderRadius: 6, fontSize: 12, fontWeight: 600,
+            fontFamily: SANS, cursor: pending.committing ? "wait" : "pointer",
+            background: "#238636", color: "#ffffff", border: "none",
+            opacity: pending.committing ? 0.7 : 1, transition: "opacity 0.15s",
+          }}
+        >
+          {pending.committing
+            ? <><Loader2 className="w-3 h-3 animate-spin" /> Push en cours…</>
+            : <><CloudUpload className="w-3.5 h-3.5" /> Oui, pousser sur GitHub</>
+          }
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={pending.committing}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+            padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 500,
+            fontFamily: SANS, cursor: "pointer",
+            background: "transparent", color: "#8b949e",
+            border: "1px solid #21262d",
+          }}
+        >
+          <Ban className="w-3 h-3" /> Annuler
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Status types                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -558,6 +634,12 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
   const [isPending, setIsPending] = useState(false);
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<ModelChoice>("auto");
+  const [confirmPush, setConfirmPush] = useState<boolean>(() => {
+    try { return localStorage.getItem("agent-ide-confirm-push") === "true"; } catch { return false; }
+  });
+  const [pendingCommit, setPendingCommit] = useState<{
+    stagedId: string; filesChanged: string[]; diffs: FileDiff[]; committing: boolean;
+  } | null>(null);
 
   const [fileTree, setFileTree] = useState<string[]>([]);
   const [atQuery, setAtQuery] = useState<string | null>(null);
@@ -710,6 +792,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
       filesChanged?: string[];
       diffs?: FileDiff[];
       commitSha?: string;
+      stagedId?: string;
       model?: string;
       suggestions?: string[];
     };
@@ -727,6 +810,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           history,
           _githubToken: fallbackToken,
           _githubRepo: fallbackRepo,
+          autoCommit: !confirmPush,
         }),
         signal: controller.signal,
       });
@@ -755,30 +839,39 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
             ev = JSON.parse(line.slice(6)) as SSEEvent;
           } catch { continue; }
 
-          if (ev.type === "status" || ev.type === "turn" || ev.type === "reading" || ev.type === "committing") {
+          if (ev.type === "status" || ev.type === "turn" || ev.type === "reading" || ev.type === "committing" || ev.type === "staged") {
             setStreamMsg(ev.message ?? "");
-            const entryType = ev.type as LogEntry["type"];
+            const entryType = (ev.type === "staged" ? "committing" : ev.type) as LogEntry["type"];
             setProgressLog(prev => [...prev, { text: ev.message ?? "", type: entryType }]);
             if (ev.type === "reading") setStatus("reading");
             else if (ev.type === "committing") setStatus("writing");
             else setStatus("thinking");
           } else if (ev.type === "done") {
             const hasChanges = (ev.filesChanged?.length ?? 0) > 0;
-            setStatus(hasChanges ? "done" : "idle");
-            setTimeout(() => setStatus("idle"), hasChanges ? 4000 : 0);
+            const isStagedMode = !!ev.stagedId;
+            setStatus(hasChanges && !isStagedMode ? "done" : "idle");
+            setTimeout(() => setStatus("idle"), hasChanges && !isStagedMode ? 4000 : 0);
             setMessages(prev => [...prev, {
               role: "agent",
               content: ev.response ?? "",
-              filesChanged: ev.filesChanged ?? [],
-              diffs: ev.diffs ?? [],
+              filesChanged: isStagedMode ? [] : (ev.filesChanged ?? []),
+              diffs: isStagedMode ? [] : (ev.diffs ?? []),
               commitSha: ev.commitSha ?? undefined,
               model: ev.model ?? undefined,
               suggestions: ev.suggestions ?? [],
             }]);
+            if (isStagedMode && hasChanges) {
+              setPendingCommit({
+                stagedId: ev.stagedId as string,
+                filesChanged: ev.filesChanged ?? [],
+                diffs: ev.diffs ?? [],
+                committing: false,
+              });
+            }
             setStreamMsg("");
             setProgressLog([]);
             setIsPending(false);
-            if (hasChanges && onAgentCommit) onAgentCommit();
+            if (hasChanges && !isStagedMode && onAgentCommit) onAgentCommit();
             return;
           } else if (ev.type === "error") {
             throw new Error(ev.message ?? "Erreur agent");
@@ -799,7 +892,52 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
       setStreamMsg("");
       abortRef.current = null;
     }
-  }, [input, imageDataUrl, isPending, currentPath, messages, selectedModel, onAgentCommit]);
+  }, [input, imageDataUrl, isPending, currentPath, messages, selectedModel, onAgentCommit, confirmPush]);
+
+  /* ---- Confirm staged commit ---- */
+  const handleCommitStaged = useCallback(async () => {
+    if (!pendingCommit) return;
+    setPendingCommit(prev => prev ? { ...prev, committing: true } : null);
+    try {
+      const res = await fetch("/api/agent/commit-staged", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stagedId: pendingCommit.stagedId }),
+      });
+      const data = await res.json() as { commitSha?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      /* Update the last agent message with commit info */
+      setMessages(prev => {
+        const updated = [...prev];
+        const lastAgent = [...updated].reverse().find(m => m.role === "agent");
+        if (lastAgent) {
+          const idx = updated.lastIndexOf(lastAgent);
+          updated[idx] = {
+            ...lastAgent,
+            filesChanged: pendingCommit.filesChanged,
+            diffs: pendingCommit.diffs,
+            commitSha: data.commitSha,
+          };
+        }
+        return updated;
+      });
+      setPendingCommit(null);
+      if (onAgentCommit) onAgentCommit();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Erreur lors du commit";
+      setPendingCommit(null);
+      setMessages(prev => [...prev, { role: "agent", content: `❌ **Erreur de push :** ${msg}`, filesChanged: [] }]);
+    }
+  }, [pendingCommit, onAgentCommit]);
+
+  /* ---- Toggle confirm-push mode ---- */
+  const handleToggleConfirmPush = useCallback(() => {
+    setConfirmPush(prev => {
+      const next = !prev;
+      try { localStorage.setItem("agent-ide-confirm-push", String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -856,6 +994,22 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               <option key={m} value={m}>{MODEL_LABELS[m]}</option>
             ))}
           </select>
+
+          {/* Confirm-push toggle */}
+          <button
+            onClick={handleToggleConfirmPush}
+            title={confirmPush ? "Mode confirmation activé — cliquer pour auto-push" : "Auto-push activé — cliquer pour demander confirmation"}
+            className="flex items-center justify-center rounded transition-colors"
+            style={{
+              width: 26, height: 26, border: "1px solid",
+              borderColor: confirmPush ? "#e3b341" : "#21262d",
+              background: confirmPush ? "#2d2100" : "transparent",
+              color: confirmPush ? "#e3b341" : "#6e7681",
+              borderRadius: 5,
+            }}
+          >
+            <ShieldCheck className="w-3 h-3" />
+          </button>
 
           {/* Reset button */}
           <button
@@ -917,6 +1071,15 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           ) : (
             <AgentResultCard key={i} msg={msg} onSuggestion={(s) => { setInput(s); inputRef.current?.focus(); }} />
           )
+        )}
+
+        {/* Pending commit confirmation card */}
+        {pendingCommit && !isPending && (
+          <PendingCommitCard
+            pending={pendingCommit}
+            onCommit={handleCommitStaged}
+            onCancel={() => setPendingCommit(null)}
+          />
         )}
 
         {/* Live activity log */}
