@@ -189,13 +189,14 @@ type GroqContent =
 async function callGroq(
   apiKey: string,
   messages: OAIMsg[],
-  image?: ImageCtx
+  image?: ImageCtx,
+  /** If true, only try the 70b model (skip 8b to avoid 413 on large prompts) */
+  only70b = false,
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
   const visionModel = "llama-3.2-11b-vision-preview";
-  const textModels = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-  ];
+  const textModels = only70b
+    ? ["llama-3.3-70b-versatile"]
+    : ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
 
   const buildMessages = (model: string) => messages.map((m, i) => {
     if (image && m.role === "user" && i === messages.findIndex((x) => x.role === "user")) {
@@ -214,16 +215,24 @@ async function callGroq(
   const lastErrors: string[] = [];
 
   for (const model of modelsToTry) {
-    // For smaller models, truncate to last 6 messages to avoid 413
+    // For smaller models, truncate to last 4 messages and system prompt to avoid 413
     const isSmallModel = model.includes("8b") || model.includes("gemma") || model.includes("mixtral") || model.includes("3b");
-    const msgs = isSmallModel
-      ? [messages[0]!, ...messages.slice(1).slice(-5)].filter(Boolean)
-      : buildMessages(model);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let msgs: any[];
+    if (isSmallModel) {
+      const sys = messages[0];
+      const rest = messages.slice(1).slice(-4);
+      // Truncate system prompt to 2000 chars for tiny models
+      const compactSys = sys ? { ...sys, content: sys.content.slice(0, 2000) } : null;
+      msgs = [compactSys, ...rest].filter(Boolean);
+    } else {
+      msgs = buildMessages(model);
+    }
 
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages: isSmallModel ? msgs : buildMessages(model), max_tokens: 4096, temperature: 0.2 }),
+      body: JSON.stringify({ model, messages: msgs, max_tokens: 4096, temperature: 0.2 }),
     });
     if (res.ok) {
       const d = (await res.json()) as { choices: { message: { content: string } }[] };
@@ -426,9 +435,9 @@ async function callLLM(
 
   const errors: string[] = [];
 
-  const tryGroq = async () => {
+  const tryGroq = async (only70b = false) => {
     if (!groqKey) return null;
-    const r = await callGroq(groqKey, messages, image);
+    const r = await callGroq(groqKey, messages, image, only70b);
     if (r.ok) return { text: r.text, model: `Groq · ${r.model}` };
     errors.push(r.err);
     return null;
@@ -475,12 +484,12 @@ async function callLLM(
   } else if (preferred === "claude") {
     result = await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
   } else if (preferred === "groq") {
-    result = await tryGroq() ?? await tryClaude() ?? await tryGPT() ?? await tryGemini() ?? await tryOpenRouter();
+    result = await tryGroq() ?? await tryOpenRouter() ?? await tryClaude() ?? await tryGPT() ?? await tryGemini();
   } else if (preferred === "gemini") {
-    result = await tryGemini() ?? await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryOpenRouter();
+    result = await tryGemini() ?? await tryClaude() ?? await tryGPT() ?? await tryOpenRouter() ?? await tryGroq();
   } else {
-    // auto: Groq first (free, fast), then Gemini, then OpenRouter, then Claude, then GPT
-    result = await tryGroq() ?? await tryGemini() ?? await tryOpenRouter() ?? await tryClaude() ?? await tryGPT();
+    // auto: Groq 70b only (skip 8b → 413) → OpenRouter (7 free models) → Gemini → Claude → GPT
+    result = await tryGroq(true) ?? await tryOpenRouter() ?? await tryGemini() ?? await tryClaude() ?? await tryGPT();
   }
 
   if (!result) {
