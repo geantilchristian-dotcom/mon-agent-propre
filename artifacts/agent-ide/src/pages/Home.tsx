@@ -49,11 +49,36 @@ function getFileIcon(name: string): { icon: string; color: string } {
 /*  Preview panel                                                       */
 /* ------------------------------------------------------------------ */
 
+/** Returns true if a URL is likely to block iframe embedding (major public sites). */
+function isLikelyBlocked(url: string): boolean {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    // Hosts known to block iframes
+    const blockedPatterns = [
+      /github\.com$/, /google\.com$/, /youtube\.com$/, /facebook\.com$/,
+      /twitter\.com$/, /x\.com$/, /instagram\.com$/, /linkedin\.com$/,
+      /wikipedia\.org$/, /reddit\.com$/, /amazon\.com$/, /apple\.com$/,
+      /microsoft\.com$/, /stackoverflow\.com$/,
+    ];
+    if (blockedPatterns.some((p) => p.test(h))) return true;
+    // Allow dev/hosting platforms that usually permit iframes
+    const allowed = ["onrender.com", "netlify.app", "vercel.app", "replit.dev",
+      "replit.app", "github.io", "pages.dev", "localhost", "127.0.0.1"];
+    if (allowed.some((a) => h.endsWith(a))) return false;
+    // Generic .com/.net/.org/.fr etc on a root domain → likely blocks
+    const parts = h.split(".");
+    if (parts.length <= 2) return true;
+    return false;
+  } catch { return false; }
+}
+
 function PreviewPanel({ previewUrl, onUrlChange }: { previewUrl: string; onUrlChange: (url: string) => void }) {
   const [editUrl, setEditUrl] = useState(previewUrl);
   const [liveUrl, setLiveUrl] = useState(previewUrl);
   const [loading, setLoading] = useState(false);
+  const [blocked, setBlocked] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const blockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navigate = (url: string) => {
     let u = url.trim();
@@ -62,6 +87,12 @@ function PreviewPanel({ previewUrl, onUrlChange }: { previewUrl: string; onUrlCh
     onUrlChange(u);
     setEditUrl(u);
     setLoading(true);
+    setBlocked(false);
+    // Schedule block detection after 3s
+    if (blockTimerRef.current) clearTimeout(blockTimerRef.current);
+    if (isLikelyBlocked(u)) {
+      blockTimerRef.current = setTimeout(() => setBlocked(true), 3000);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); navigate(editUrl); };
@@ -69,8 +100,22 @@ function PreviewPanel({ previewUrl, onUrlChange }: { previewUrl: string; onUrlCh
   const handleRefresh = () => {
     if (iframeRef.current && liveUrl) {
       setLoading(true);
+      setBlocked(false);
       iframeRef.current.src = liveUrl;
+      if (isLikelyBlocked(liveUrl)) {
+        if (blockTimerRef.current) clearTimeout(blockTimerRef.current);
+        blockTimerRef.current = setTimeout(() => setBlocked(true), 3000);
+      }
     }
+  };
+
+  const handleIframeLoad = () => {
+    setLoading(false);
+    // Try to detect blank/blocked content (cross-origin will throw, same-origin empty = blocked)
+    try {
+      const doc = iframeRef.current?.contentDocument;
+      if (doc && doc.body && doc.body.innerHTML.trim() === "") setBlocked(true);
+    } catch { /* cross-origin — can't inspect, rely on timer */ }
   };
 
   return (
@@ -129,17 +174,63 @@ function PreviewPanel({ previewUrl, onUrlChange }: { previewUrl: string; onUrlCh
         )}
       </div>
 
+      {/* Blocked overlay */}
+      {blocked && liveUrl && (
+        <div
+          className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center"
+          style={{ background: "#0d1117" }}
+        >
+          <div style={{
+            width: 56, height: 56, borderRadius: 14,
+            background: "#161b22", border: "1px solid #30363d",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <ExternalLink style={{ width: 24, height: 24, color: "#388bfd" }} />
+          </div>
+          <div>
+            <p style={{ color: "#c9d1d9", fontSize: 14, fontWeight: 600, margin: 0 }}>
+              Ce site bloque l'aperçu intégré
+            </p>
+            <p style={{ color: "#6e7681", fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+              La plupart des sites .com, .net, .org et autres domaines publics<br />
+              refusent d'être affichés dans un cadre intégré (iframe) pour des raisons<br />
+              de sécurité. C'est une limitation du navigateur, pas de l'agent.
+            </p>
+          </div>
+          <a
+            href={liveUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "8px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600,
+              background: "#238636", color: "#ffffff", textDecoration: "none",
+              border: "1px solid #2ea043",
+            }}
+          >
+            <ExternalLink style={{ width: 13, height: 13 }} />
+            Ouvrir {new URL(liveUrl).hostname} dans un onglet
+          </a>
+          <button
+            onClick={() => setBlocked(false)}
+            style={{ fontSize: 11, color: "#6e7681", background: "none", border: "none", cursor: "pointer" }}
+          >
+            Essayer quand même d'afficher
+          </button>
+        </div>
+      )}
+
       {/* Iframe or empty state */}
-      {liveUrl ? (
+      {!blocked && liveUrl ? (
         <iframe
           ref={iframeRef}
           src={liveUrl}
           title="Aperçu de l'application"
-          onLoad={() => setLoading(false)}
+          onLoad={handleIframeLoad}
           style={{ flex: 1, border: "none", background: "#ffffff" }}
           allow="clipboard-read; clipboard-write"
         />
-      ) : (
+      ) : !blocked && (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
           <div
             style={{
