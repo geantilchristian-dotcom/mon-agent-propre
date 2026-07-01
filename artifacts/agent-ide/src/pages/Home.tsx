@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Sidebar, saveRecentProject } from "@/components/Sidebar";
 import { Editor, EditorHandle } from "@/components/Editor";
 import { ChatPanel } from "@/components/ChatPanel";
@@ -886,18 +886,81 @@ export function Home() {
         </div>
       ) : (
         /* ---------- DESKTOP: 3-column layout ---------- */
-        <div className="flex flex-1 overflow-hidden">
-          <div style={{ width: 220, background: "#010409", borderRight: "1px solid #21262d", display: "flex", flexDirection: "column", flexShrink: 0 }}>
-            {sidebarPanel}
-          </div>
-
-          {editorPanel}
-
-          <div style={{ width: 320, borderLeft: "1px solid #21262d", display: "flex", flexDirection: "column", flexShrink: 0, background: "#010409" }}>
-            {chatPanel}
-          </div>
-        </div>
+        <DesktopLayout sidebarPanel={sidebarPanel} editorPanel={editorPanel} chatPanel={chatPanel} />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  DesktopLayout — resizable chat panel                               */
+/* ------------------------------------------------------------------ */
+function DesktopLayout({
+  sidebarPanel, editorPanel, chatPanel,
+}: { sidebarPanel: React.ReactNode; editorPanel: React.ReactNode; chatPanel: React.ReactNode }) {
+  const MIN_CHAT = 260;
+  const MAX_CHAT = 720;
+  const [chatWidth, setChatWidth] = useState(340);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(0);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startX.current = e.clientX;
+    startW.current = chatWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [chatWidth]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = startX.current - e.clientX; // dragging left = wider chat
+      const next = Math.min(MAX_CHAT, Math.max(MIN_CHAT, startW.current + delta));
+      setChatWidth(next);
+    };
+    const onUp = () => {
+      if (!dragging.current) return;
+      dragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, []);
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      {/* Sidebar */}
+      <div style={{ width: 220, background: "#010409", borderRight: "1px solid #21262d", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+        {sidebarPanel}
+      </div>
+
+      {/* Editor — fills remaining space */}
+      {editorPanel}
+
+      {/* Drag handle */}
+      <div
+        onMouseDown={onMouseDown}
+        title="Glisser pour redimensionner"
+        style={{
+          width: 5, flexShrink: 0, cursor: "col-resize",
+          background: "transparent",
+          borderLeft: "1px solid #21262d",
+          transition: "background 0.15s",
+          position: "relative", zIndex: 10,
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = "#3fb95033")}
+        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+      />
+
+      {/* Chat panel — dynamic width */}
+      <div style={{ width: chatWidth, minWidth: MIN_CHAT, maxWidth: MAX_CHAT, display: "flex", flexDirection: "column", flexShrink: 0, background: "#010409" }}>
+        {chatPanel}
+      </div>
     </div>
   );
 }
