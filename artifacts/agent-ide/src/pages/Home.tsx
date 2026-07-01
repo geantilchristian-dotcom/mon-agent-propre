@@ -394,9 +394,11 @@ export function Home() {
     }
   };
 
+  const [editorIsDirty, setEditorIsDirty] = useState(false);
+  const [editorIsSaving, setEditorIsSaving] = useState(false);
+
   const handlePush = () => editorRef.current?.save();
-  const editorHandle = editorRef.current;
-  const canPush = connected && !!currentPath && (editorHandle?.isDirty ?? false) && !(editorHandle?.isSaving ?? false);
+  const canPush = connected && !!currentPath && editorIsDirty && !editorIsSaving;
 
   /* ---- shared panels ---- */
   const sidebarPanel = (
@@ -414,7 +416,7 @@ export function Home() {
   );
 
   const editorPanel = (
-    <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{ height: "100%" }}>
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{ height: "100%", willChange: "auto" }}>
       {/* Tab bar — file tabs + preview tab */}
       <div
         className="flex items-stretch shrink-0 overflow-x-auto"
@@ -493,6 +495,8 @@ export function Home() {
             connected={connected}
             appliedCode={appliedCode}
             onApplied={() => setAppliedCode(null)}
+            onDirtyChange={setEditorIsDirty}
+            onSavingChange={setEditorIsSaving}
           />
         ) : (
           <WelcomeScreen repo={repo} onSearch={() => setShowSearch(true)} isMobile={isMobile} />
@@ -646,7 +650,7 @@ export function Home() {
               color: canPush ? "#ffffff" : "#6e7681",
             }}
           >
-            {editorHandle?.isSaving
+            {editorIsSaving
               ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" />
               : <Upload style={{ width: 13, height: 13 }} />}
             {!isMobile && "Push ↑"}
