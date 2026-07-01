@@ -572,13 +572,19 @@ function buildSystemPrompt(fileTree: string[], userInstructions?: string): strin
 - Un **développeur senior** capable de lire, créer, modifier et supprimer des fichiers dans un dépôt GitHub
 - Un **assistant conversationnel** qui répond à toutes les questions : programmation, concepts, debug, architecture, technologies, ou même des questions générales
 
-## Mode de réponse
+## Mode de réponse — RÈGLE ABSOLUE
 
-**Si la demande est une question, une discussion ou une explication** → réponds directement, clairement, sans forcément toucher aux fichiers. Sois concis et utile, comme un collègue senior.
+**Tu dois TOUJOURS répondre à n'importe quelle question**, qu'elle soit :
+- Une question générale (programmation, concepts, technologies, histoire, maths, etc.)
+- Une demande d'explication ou de conseil
+- Une tâche de code sur le projet
+- Même une question hors-sujet ou ambiguë → réponds quand même du mieux possible
 
-**Si la demande est une tâche de code** (créer, modifier, corriger) → utilise tes outils fichiers et applique les changements.
+**Ne laisse JAMAIS une réponse vide ou un crash.** Si tu ne comprends pas, dis-le poliment et propose une reformulation.
 
-Tu peux mélanger les deux : expliquer ET modifier du code dans la même réponse.
+**Si la demande est une question** → réponds directement, clairement. Pas besoin de toucher aux fichiers.
+**Si la demande est une tâche de code** → lis d'abord les fichiers, puis applique les changements.
+Tu peux combiner les deux : expliquer ET modifier dans la même réponse.
 
 ---
 ${hasProject ? `## Projet connecté (${fileTree.length} fichiers)
@@ -615,12 +621,13 @@ CONTENU COMPLET du nouveau fichier
 
 ## Règles ABSOLUES pour les tâches de code
 
-1. **LIS TOUJOURS avant de modifier** — <read_file /> est obligatoire avant tout edit_file
-2. **edit_file pour les fichiers existants, write_file uniquement pour les nouveaux** — Ne jamais réécrire un fichier existant entier avec write_file
-3. **old = copie exacte** — Le texte dans <old> doit être identique au fichier (même indentation, même espaces, même ponctuation). Si ce n'est pas exact, la modification échoue.
-4. **Chirurgical** — Ne modifie QUE les lignes concernées. N'ajoute, ne reformate, ne réindente rien d'autre.
-5. **Scope minimal** — Si la demande concerne une fonction, ne touche qu'à cette fonction
-6. **Même stack** — Respecte strictement les patterns et bibliothèques existants` : `## Aucun projet connecté
+1. **LIS TOUJOURS avant de modifier** — <read_file /> est OBLIGATOIRE avant tout edit_file. Sans lire le fichier, tu ne peux pas connaître le contenu exact à remplacer.
+2. **Si tu n'as pas lu un fichier, n'utilise PAS edit_file sur ce fichier.** Commence par demander sa lecture avec <read_file />, attends le contenu, puis rédige ton edit.
+3. **edit_file pour les fichiers existants, write_file uniquement pour les nouveaux** — Ne jamais réécrire un fichier existant entier avec write_file.
+4. **old = copie exacte mot pour mot** — Copie le texte depuis le fichier lu. Même indentation, mêmes espaces, même ponctuation, mêmes sauts de ligne. La moindre différence fait échouer la modification.
+5. **Chirurgical** — Ne modifie QUE les lignes nécessaires. N'ajoute, ne reformate, ne réindente rien d'autre.
+6. **Scope minimal** — Si la demande concerne une fonction, ne touche qu'à cette fonction.
+7. **Même stack** — Respecte strictement les patterns et bibliothèques existants.` : `## Aucun projet connecté
 Tu peux répondre à toutes les questions générales. Pour des tâches de code sur un dépôt, l'utilisateur doit d'abord connecter un dépôt GitHub via la sidebar.`}
 
 ---
@@ -781,14 +788,15 @@ async function runAgenticLoop(
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         const t = await callLLM(msgs, keys.groqKey, keys.geminiKey, turnCount === 1 ? image : undefined, keys.claudeKey, preferred, keys.openrouterKey, keys.openaiKey);
-        if (t.text.trim().length > 50) {
+        /* Accept any non-empty response — short conversational answers are valid */
+        if (t.text.trim().length > 0) {
           turn = t;
           break;
         }
         if (attempt < MAX_RETRIES) {
-          onProgress?.({ type: "status", message: `⚠️ Réponse insuffisante, nouvelle tentative (${attempt + 1}/${MAX_RETRIES})...` });
+          onProgress?.({ type: "status", message: `⚠️ Réponse vide, nouvelle tentative (${attempt + 1}/${MAX_RETRIES})...` });
           msgs.push({ role: "assistant", content: t.text });
-          msgs.push({ role: "user", content: "Ta réponse était vide ou incomplète. Reprends : utilise edit_file pour modifier des fichiers existants, write_file uniquement pour créer de nouveaux fichiers." });
+          msgs.push({ role: "user", content: "Ta réponse était complètement vide. Réponds à la question posée." });
         }
       } catch (e) {
         if (attempt === MAX_RETRIES) throw e;
@@ -799,6 +807,39 @@ async function runAgenticLoop(
     if (!turn) break;
     lastText = turn.text;
     modelName = turn.model;
+
+    /* --- Detect writes/edits that target files not yet read, force a read turn --- */
+    if (hasGitHub) {
+      const pendingEdits = parseEdits(lastText).map((e) => e.path);
+      /* write_file on existing tree paths is also suspicious — check those too */
+      const pendingWrites = parseWrites(lastText)
+        .map((w) => w.path)
+        .filter((p) => fileTree.includes(p));
+      const unread = [...new Set([...pendingEdits, ...pendingWrites])].filter(
+        (p) => !readDone.has(p) && fileTree.includes(p)
+      );
+      if (unread.length > 0) {
+        /* Agent tried to modify without reading — inject the file contents and loop again */
+        onProgress?.({ type: "reading", files: unread, message: `📖 Lecture préalable obligatoire : ${unread.slice(0, 3).join(", ")}` });
+        const injected: string[] = [];
+        for (const p of unread.slice(0, 10)) {
+          readDone.add(p);
+          const f = await readFile(kit!, owner!, repo!, p);
+          if (f) {
+            readCache.set(p, f.content);
+            injected.push(`=== ${p} ===\n\`\`\`\n${truncateContent(f.content)}\n\`\`\``);
+          } else {
+            injected.push(`=== ${p} ===\n(fichier non trouvé — utilise write_file pour le créer)`);
+          }
+        }
+        msgs.push({ role: "assistant", content: lastText });
+        msgs.push({
+          role: "user",
+          content: `⛔ Tu as tenté de modifier des fichiers sans les avoir lus. Voici leur contenu exact :\n\n${injected.join("\n\n")}\n\n---\nMaintenant refais ta réponse complète avec des balises <old> copiées mot pour mot depuis ces fichiers.`,
+        });
+        continue; /* next turn with file content injected */
+      }
+    }
 
     const newPaths = parseReadRequests(lastText).filter((p) => !readDone.has(p));
     if (newPaths.length === 0) break;
@@ -828,6 +869,12 @@ async function runAgenticLoop(
       role: "user",
       content: `Voici les fichiers demandés (${fileContents.length}) :\n\n${fileContents.join("\n\n")}\n\n---\nEffectue maintenant TOUTES les modifications en une seule réponse. N'oublie aucun fichier impacté.`,
     });
+  }
+
+  /* 5b. Safety fallback — if lastText is somehow empty, return a graceful message */
+  if (!lastText.trim()) {
+    lastText = "Je n'ai pas pu générer de réponse pour cette demande. Pourriez-vous reformuler votre question ?";
+    modelName = modelName || "fallback";
   }
 
   /* 6. Parse writes, edits & deletes */
