@@ -698,6 +698,14 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Auto-grow textarea on input change
+  useEffect(() => {
+    const ta = inputRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 260)}px`;
+  }, [input]);
+
   const resetMutation = useResetChat();
 
   useEffect(() => {
@@ -1318,11 +1326,13 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               rows={1}
               className="resize-none text-xs leading-relaxed pr-8"
               style={{
-                fontFamily: SANS, fontSize: 12.5,
+                fontFamily: SANS, fontSize: 13,
                 background: "#0d1117", border: "1px solid #21262d",
                 borderRadius: 8, color: "#c9d1d9",
-                minHeight: 36, maxHeight: 120,
-                padding: "8px 32px 8px 10px",
+                minHeight: 42, maxHeight: 260,
+                overflowY: "auto",
+                padding: "10px 32px 10px 12px",
+                lineHeight: 1.55,
               }}
             />
             <button
