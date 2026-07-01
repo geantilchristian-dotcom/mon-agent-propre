@@ -196,17 +196,17 @@ async function callGroq(
   const visionModels = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"];
   const visionModel = visionModels[0]!;
   // Full cascade of Groq models — ordered by quality, each with a different rate-limit bucket
-  // Groq model IDs verified July 2025 — llama-4-scout name is wrong on Groq, removed
+  // Groq active models July 2025 — decommissioned: deepseek-r1, qwen-qwq-32b, llama-3.1-70b
   const fullTextModels = [
-    "llama-3.3-70b-versatile",          // flagship, 128k context
-    "deepseek-r1-distill-llama-70b",    // reasoning model, verified on Groq
-    "qwen-qwq-32b",                     // Qwen reasoning, 128k context
-    "llama-3.1-70b-versatile",          // stable 70b fallback
-    "gemma2-9b-it",                     // small but always available
+    "llama-3.3-70b-versatile",          // active, may rate-limit → try next
+    "llama3-70b-8192",                  // older llama3, still active on Groq
+    "gemma2-9b-it",                     // active, reliable
+    "llama3-8b-8192",                   // older llama3-8b, still active
+    "llama-3.2-3b-preview",             // small, active
     "llama-3.1-8b-instant",             // last resort (413 risk on large prompts)
   ];
   const textModels = only70b
-    ? fullTextModels.slice(0, 4)        // skip small models in auto mode
+    ? fullTextModels.slice(0, 3)        // skip small models in auto mode
     : fullTextModels;
 
   const buildMessages = (model: string) => messages.map((m, i) => {
@@ -352,18 +352,18 @@ async function callOpenRouter(
   apiKey: string,
   messages: OAIMsg[],
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
-  // Free models verified July 2025 — removed models that returned 404 (now paid-only on OR)
+  // OpenRouter free models — confirmed active July 2025 (removed all 404 paid-only models)
   const freeModels = [
-    "meta-llama/llama-3.3-70b-instruct:free",               // Llama 3.3 70B — exists (may rate-limit)
-    "google/gemma-3-27b-it:free",                           // Gemma 3 27B — reliably free
-    "google/gemma-3-12b-it:free",                           // Gemma 3 12B — smaller fallback
-    "mistralai/mistral-small-3.2-24b-instruct:free",        // Mistral Small 24B
-    "microsoft/phi-3.5-mini-128k-instruct:free",            // Phi 3.5 Mini, 128k context
-    "nousresearch/hermes-3-llama-3.1-405b:free",            // Hermes 405B (large)
-    "meta-llama/llama-3.2-11b-vision-instruct:free",        // Llama vision (multimodal)
-    "mistralai/mistral-7b-instruct:free",                   // Mistral 7B classic
-    "microsoft/phi-3-medium-128k-instruct:free",            // Phi 3 Medium
-    "meta-llama/llama-3.2-3b-instruct:free",               // Llama 3.2 3B (last resort)
+    "meta-llama/llama-3.3-70b-instruct:free",     // 429 = rate-limited but EXISTS
+    "mistralai/mistral-7b-instruct:free",          // classic, consistently free
+    "meta-llama/llama-3.2-11b-vision-instruct:free", // vision + text, free
+    "meta-llama/llama-3.2-3b-instruct:free",      // small, reliable free tier
+    "nousresearch/hermes-3-llama-3.1-405b:free",  // large model, free tier
+    "microsoft/phi-3-medium-128k-instruct:free",  // Microsoft, free tier
+    "moonshotai/kimi-k2:free",                    // Moonshot, new free model
+    "tngtech/deepseek-r1t-chimera:free",          // DeepSeek chimera, free
+    "sarvamai/sarvam-m:free",                     // Sarvam, free
+    "meta-llama/llama-3.1-8b-instruct:free",      // small llama, last resort
   ];
 
   const lastErrors: string[] = [];
@@ -556,8 +556,8 @@ async function callLLM(
   } else if (preferred === "gemini") {
     result = await tryGemini() ?? await tryClaude() ?? await tryGPT() ?? await tryOpenRouter() ?? await tryGroq();
   } else {
-    // auto: Groq 70b only (skip 8b → 413) → OpenRouter (12 free models) → Gemini → Claude → GPT
-    result = await tryGroq(true) ?? await tryOpenRouter() ?? await tryGemini() ?? await tryClaude() ?? await tryGPT();
+    // auto: Groq → Gemini (clé API valide, 4 modèles) → OpenRouter → Claude → GPT
+    result = await tryGroq(true) ?? await tryGemini() ?? await tryOpenRouter() ?? await tryClaude() ?? await tryGPT();
   }
 
   if (!result) {
