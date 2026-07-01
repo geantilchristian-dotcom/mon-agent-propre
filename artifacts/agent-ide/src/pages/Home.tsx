@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 const STORAGE_KEY = "agent-ide-github-config";
-const PREVIEW_URL_KEY = "agent-ide-preview-url";
+const getPreviewKey = (repo: string) => `agent-ide-preview-${repo.replace("/", "-")}`;
 
 /* ------------------------------------------------------------------ */
 /*  Mobile detection hook                                               */
@@ -284,14 +284,14 @@ export function Home() {
   const [banner, setBanner] = useState<{ text: string; ok: boolean } | null>(null);
   const [showSearch, setShowSearch] = useState(false);
   const [agentRefreshKey, setAgentRefreshKey] = useState(0);
-  const [previewUrl, setPreviewUrl] = useState(() => {
-    try { return localStorage.getItem(PREVIEW_URL_KEY) ?? ""; } catch { return ""; }
-  });
+  const [previewUrl, setPreviewUrl] = useState("");
   const [showPreview, setShowPreview] = useState(false);
 
   const handlePreviewUrlChange = (url: string) => {
     setPreviewUrl(url);
-    try { localStorage.setItem(PREVIEW_URL_KEY, url); } catch { /* ignore */ }
+    if (repo) {
+      try { localStorage.setItem(getPreviewKey(repo), url); } catch { /* ignore */ }
+    }
   };
 
   const editorRef = useRef<EditorHandle>(null);
@@ -325,6 +325,7 @@ export function Home() {
                 setConnected(true);
                 setRepo(savedRepo);
                 fetchBranch();
+                loadPreviewForRepo(savedRepo);
               }
             }
           );
@@ -352,6 +353,14 @@ export function Home() {
     return () => window.removeEventListener("keydown", handler);
   }, [connected]);
 
+  const loadPreviewForRepo = (repoName: string) => {
+    try {
+      const savedUrl = localStorage.getItem(getPreviewKey(repoName)) ?? "";
+      setPreviewUrl(savedUrl);
+      if (savedUrl) setShowPreview(true);
+    } catch { /* ignore */ }
+  };
+
   const handleConnect = (token: string, repoName: string) => {
     configureMutation.mutate(
       { data: { token, repo: repoName } },
@@ -363,6 +372,7 @@ export function Home() {
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ token, repo: repoName })); } catch { /* ignore */ }
           showBanner(`Connecté à ${repoName} ✓`, true);
           fetchBranch();
+          loadPreviewForRepo(repoName);
           if (isMobile) setMobileTab("editor");
         },
         onError: () => showBanner("Échec de connexion GitHub", false),
@@ -376,6 +386,8 @@ export function Home() {
     setBranch("main");
     setCurrentPath(null);
     setOpenTabs([]);
+    setPreviewUrl("");
+    setShowPreview(false);
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
   };
 
@@ -631,23 +643,23 @@ export function Home() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Push button */}
-        {connected && currentPath && (
+        {/* Push button — always visible when connected */}
+        {connected && (
           <button
             onClick={handlePush}
             disabled={!canPush}
-            title={canPush ? `Pousser sur GitHub` : "Aucune modification"}
+            title={canPush ? "Pousser les modifications sur GitHub" : !currentPath ? "Ouvrez un fichier pour modifier et pousser" : "Aucune modification en attente"}
             style={{
               display: "flex", alignItems: "center", gap: 5,
               padding: isMobile ? "8px 14px" : "4px 12px",
               borderRadius: 6, fontSize: isMobile ? 13 : 12,
               fontFamily: "'Inter', sans-serif", fontWeight: 500,
-              cursor: canPush ? "pointer" : "not-allowed",
+              cursor: canPush ? "pointer" : "default",
               border: "1px solid",
               transition: "all 0.15s",
-              borderColor: canPush ? "#238636" : "#21262d",
+              borderColor: canPush ? "#238636" : "#30363d",
               background: canPush ? "#238636" : "transparent",
-              color: canPush ? "#ffffff" : "#6e7681",
+              color: canPush ? "#ffffff" : "#484f58",
             }}
           >
             {editorIsSaving
