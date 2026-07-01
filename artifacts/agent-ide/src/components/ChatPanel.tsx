@@ -26,7 +26,7 @@ interface ChatPanelProps {
   onAgentCommit?: () => void;
 }
 
-type ModelChoice = "auto" | "claude" | "groq" | "gemini";
+type ModelChoice = "auto" | "claude" | "gpt" | "groq" | "gemini";
 
 interface FileDiff {
   path: string;
@@ -607,6 +607,7 @@ const STATUS_COLORS: Record<AgentStatus, string> = {
 const MODEL_LABELS: Record<ModelChoice, string> = {
   auto:   "Auto",
   claude: "Claude",
+  gpt:    "GPT",
   groq:   "Groq",
   gemini: "Gemini",
 };

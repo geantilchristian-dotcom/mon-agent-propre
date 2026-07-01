@@ -372,7 +372,50 @@ async function callOpenRouter(
   return { ok: false, err: `OpenRouter: ${lastErrors.join(" → ")}` };
 }
 
-type PreferredModel = "auto" | "claude" | "groq" | "gemini";
+type PreferredModel = "auto" | "claude" | "groq" | "gemini" | "gpt";
+
+/* ------------------------------------------------------------------ */
+/*  OpenAI — GPT-4o and fallbacks                                      */
+/* ------------------------------------------------------------------ */
+
+async function callOpenAI(
+  apiKey: string,
+  messages: OAIMsg[],
+  image?: ImageCtx,
+): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
+  const models = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"];
+  const lastErrors: string[] = [];
+
+  for (const model of models) {
+    const oaiMessages = messages.map((m, i) => {
+      if (image && m.role === "user" && i === messages.findIndex((x) => x.role === "user")) {
+        return {
+          role: m.role,
+          content: [
+            { type: "text" as const, text: m.content },
+            { type: "image_url" as const, image_url: { url: `data:${image.mime};base64,${image.base64}` } },
+          ],
+        };
+      }
+      return m;
+    });
+
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, messages: oaiMessages, max_tokens: 8192, temperature: 0.2 }),
+    });
+    if (res.ok) {
+      const d = (await res.json()) as { choices: { message: { content: string } }[] };
+      return { ok: true, text: d.choices[0]?.message?.content ?? "", model };
+    }
+    const body = await res.text().catch(() => "");
+    lastErrors.push(`${model} ${res.status}: ${body.slice(0, 120)}`);
+    if (res.status !== 429) break;
+  }
+
+  return { ok: false, err: `OpenAI: ${lastErrors.join(" → ")}` };
+}
 
 async function callLLM(
   messages: OAIMsg[],
@@ -382,6 +425,7 @@ async function callLLM(
   claudeKey?: string,
   preferred: PreferredModel = "auto",
   openrouterKey?: string,
+  openaiKey?: string,
 ): Promise<{ text: string; model: string }> {
 
   const errors: string[] = [];
@@ -420,16 +464,27 @@ async function callLLM(
     return null;
   };
 
+  const tryGPT = async () => {
+    if (!openaiKey) return null;
+    const r = await callOpenAI(openaiKey, messages, image);
+    if (r.ok) return { text: r.text, model: `GPT · ${r.model}` };
+    errors.push(r.err);
+    return null;
+  };
+
   let result: { text: string; model: string } | null = null;
 
-  if (preferred === "claude") {
-    result = await tryClaude() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
+  if (preferred === "gpt") {
+    result = await tryGPT() ?? await tryClaude() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
+  } else if (preferred === "claude") {
+    result = await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
   } else if (preferred === "groq") {
-    result = await tryGroq() ?? await tryClaude() ?? await tryGemini() ?? await tryOpenRouter();
+    result = await tryGroq() ?? await tryClaude() ?? await tryGPT() ?? await tryGemini() ?? await tryOpenRouter();
   } else if (preferred === "gemini") {
-    result = await tryGemini() ?? await tryClaude() ?? await tryGroq() ?? await tryOpenRouter();
+    result = await tryGemini() ?? await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryOpenRouter();
   } else {
-    result = await tryClaude() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
+    // auto: Claude first (best quality), then GPT, then Groq, Gemini, OpenRouter
+    result = await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
   }
 
   if (!result) {
@@ -636,7 +691,7 @@ async function runAgenticLoop(
   owner: string | null,
   repo: string | null,
   input: AgentRunInput,
-  keys: { claudeKey?: string; groqKey?: string; geminiKey?: string; openrouterKey?: string },
+  keys: { claudeKey?: string; groqKey?: string; geminiKey?: string; openrouterKey?: string; openaiKey?: string },
   onProgress?: ProgressFn,
   autoCommit = true
 ): Promise<AgentRunResult> {
@@ -694,7 +749,7 @@ async function runAgenticLoop(
     let turn: { text: string; model: string } | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const t = await callLLM(msgs, keys.groqKey, keys.geminiKey, turnCount === 1 ? image : undefined, keys.claudeKey, preferred, keys.openrouterKey);
+        const t = await callLLM(msgs, keys.groqKey, keys.geminiKey, turnCount === 1 ? image : undefined, keys.claudeKey, preferred, keys.openrouterKey, keys.openaiKey);
         if (t.text.trim().length > 50) {
           turn = t;
           break;
@@ -805,7 +860,7 @@ async function runAgenticLoop(
 /* ------------------------------------------------------------------ */
 
 function parseAgentRequest(body: unknown):
-  | { ok: true; input: AgentRunInput; kit: Octokit | null; owner: string | null; repo: string | null; keys: { claudeKey?: string; groqKey?: string; geminiKey?: string; openrouterKey?: string }; error?: never }
+  | { ok: true; input: AgentRunInput; kit: Octokit | null; owner: string | null; repo: string | null; keys: { claudeKey?: string; groqKey?: string; geminiKey?: string; openrouterKey?: string; openaiKey?: string }; error?: never }
   | { ok: false; error: string; status: number } {
   const parsed = RunAgentBody.safeParse(body);
   if (!parsed.success) return { ok: false, error: "Corps de requête invalide", status: 400 };
@@ -814,9 +869,10 @@ function parseAgentRequest(body: unknown):
   const groqKey = process.env["GROQ_API_KEY"];
   const geminiKey = process.env["GEMINI_API_KEY"];
   const openrouterKey = process.env["OPENROUTER_KEY"];
+  const openaiKey = process.env["OPENAI_API_KEY"];
 
-  if (!claudeKey && !groqKey && !geminiKey && !openrouterKey) {
-    return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY, GEMINI_API_KEY ou OPENROUTER_KEY dans les variables d'environnement.", status: 500 };
+  if (!claudeKey && !groqKey && !geminiKey && !openrouterKey && !openaiKey) {
+    return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, GEMINI_API_KEY ou OPENROUTER_KEY dans les variables d'environnement.", status: 500 };
   }
 
   /* If server-side state was lost (e.g. after a restart), recover from
