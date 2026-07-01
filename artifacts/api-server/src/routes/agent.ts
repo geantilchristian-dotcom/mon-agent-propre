@@ -1065,7 +1065,7 @@ router.get("/agent/health", async (_req, res) => {
 /* ------------------------------------------------------------------ */
 
 /* JSON route */
-router.post("/agent/run", requireSecret, async (req, res) => {
+router.post("/agent/run", async (req, res) => {
   const ctx = parseAgentRequest(req.body);
   if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
   const autoCommit = (req.body as Record<string, unknown>)["autoCommit"] !== false;
@@ -1081,7 +1081,7 @@ router.post("/agent/run", requireSecret, async (req, res) => {
 });
 
 /* SSE streaming route */
-router.post("/agent/stream", requireSecret, async (req, res) => {
+router.post("/agent/stream", async (req, res) => {
   const ctx = parseAgentRequest(req.body);
   if (!ctx.ok) { res.status(ctx.status).json({ error: ctx.error }); return; }
   const autoCommit = (req.body as Record<string, unknown>)["autoCommit"] !== false;
@@ -1107,7 +1107,7 @@ router.post("/agent/stream", requireSecret, async (req, res) => {
 });
 
 /* Confirm staged commit route */
-router.post("/agent/commit-staged", requireSecret, async (req, res) => {
+router.post("/agent/commit-staged", async (req, res) => {
   const { stagedId } = req.body as { stagedId?: string };
   if (!stagedId) { res.status(400).json({ error: "stagedId requis" }); return; }
 
