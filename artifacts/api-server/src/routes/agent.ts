@@ -977,7 +977,7 @@ function parseAgentRequest(body: unknown):
     }
   }
 
-  return { ok: true, input: parsed.data, kit, owner, repo, keys: { claudeKey, groqKey, geminiKey, openrouterKey } };
+  return { ok: true, input: parsed.data, kit, owner, repo, keys: { claudeKey, groqKey, geminiKey, openrouterKey, openaiKey } };
 }
 
 /* ------------------------------------------------------------------ */
