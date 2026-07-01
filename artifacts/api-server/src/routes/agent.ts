@@ -193,20 +193,20 @@ async function callGroq(
   /** If true, only try the 70b model (skip 8b to avoid 413 on large prompts) */
   only70b = false,
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
-  const visionModels = ["llama-3.2-11b-vision-preview", "llama-4-scout-17b-16e-instruct"];
+  const visionModels = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"];
   const visionModel = visionModels[0]!;
   // Full cascade of Groq models — ordered by quality, each with a different rate-limit bucket
+  // Groq model IDs verified July 2025 — llama-4-scout name is wrong on Groq, removed
   const fullTextModels = [
     "llama-3.3-70b-versatile",          // flagship, 128k context
-    "llama-4-scout-17b-16e-instruct",   // Llama 4, fast and capable
-    "deepseek-r1-distill-llama-70b",    // reasoning model
+    "deepseek-r1-distill-llama-70b",    // reasoning model, verified on Groq
     "qwen-qwq-32b",                     // Qwen reasoning, 128k context
-    "llama-3.1-70b-versatile",          // fallback 70b
+    "llama-3.1-70b-versatile",          // stable 70b fallback
     "gemma2-9b-it",                     // small but always available
     "llama-3.1-8b-instant",             // last resort (413 risk on large prompts)
   ];
   const textModels = only70b
-    ? fullTextModels.slice(0, 5)        // skip small models in auto mode
+    ? fullTextModels.slice(0, 4)        // skip small models in auto mode
     : fullTextModels;
 
   const buildMessages = (model: string) => messages.map((m, i) => {
@@ -352,19 +352,17 @@ async function callOpenRouter(
   apiKey: string,
   messages: OAIMsg[],
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
-  // 12 free models on OpenRouter — each has its own independent rate-limit bucket
+  // Free models verified July 2025 — removed models that returned 404 (now paid-only on OR)
   const freeModels = [
-    "meta-llama/llama-4-scout:free",                        // Llama 4 Scout (newest)
-    "meta-llama/llama-4-maverick:free",                     // Llama 4 Maverick
-    "meta-llama/llama-3.3-70b-instruct:free",               // Llama 3.3 70B
-    "deepseek/deepseek-r1-distill-llama-70b:free",          // DeepSeek R1 reasoning
-    "deepseek/deepseek-chat-v3-0324:free",                  // DeepSeek Chat v3
-    "qwen/qwq-32b:free",                                    // Qwen QwQ 32B reasoning
-    "qwen/qwen-2.5-72b-instruct:free",                      // Qwen 2.5 72B
-    "nvidia/llama-3.1-nemotron-70b-instruct:free",          // NVIDIA Nemotron 70B
+    "meta-llama/llama-3.3-70b-instruct:free",               // Llama 3.3 70B — exists (may rate-limit)
+    "google/gemma-3-27b-it:free",                           // Gemma 3 27B — reliably free
+    "google/gemma-3-12b-it:free",                           // Gemma 3 12B — smaller fallback
     "mistralai/mistral-small-3.2-24b-instruct:free",        // Mistral Small 24B
-    "google/gemma-3-27b-it:free",                           // Gemma 3 27B
-    "mistralai/mistral-7b-instruct:free",                   // Mistral 7B (fallback)
+    "microsoft/phi-3.5-mini-128k-instruct:free",            // Phi 3.5 Mini, 128k context
+    "nousresearch/hermes-3-llama-3.1-405b:free",            // Hermes 405B (large)
+    "meta-llama/llama-3.2-11b-vision-instruct:free",        // Llama vision (multimodal)
+    "mistralai/mistral-7b-instruct:free",                   // Mistral 7B classic
+    "microsoft/phi-3-medium-128k-instruct:free",            // Phi 3 Medium
     "meta-llama/llama-3.2-3b-instruct:free",               // Llama 3.2 3B (last resort)
   ];
 
