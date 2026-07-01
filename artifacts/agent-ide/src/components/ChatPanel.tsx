@@ -408,9 +408,9 @@ function LiveActivity({ log, status }: { log: LogEntry[]; status: AgentStatus })
 /*  Agent result card                                                   */
 /* ------------------------------------------------------------------ */
 
-function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s: string) => void }) {
+function AgentResultCard({ msg, onSuggestion, repo }: { msg: Message; onSuggestion: (s: string) => void; repo?: string }) {
   const hasChanges = (msg.filesChanged?.length ?? 0) > 0;
-  const repoUrl = "https://github.com/geantilchristian-dotcom/mon-agent-propre";
+  const repoUrl = repo ? `https://github.com/${repo}` : null;
 
   return (
     <div className="group w-full max-w-[95%]">
@@ -489,12 +489,33 @@ function AgentResultCard({ msg, onSuggestion }: { msg: Message; onSuggestion: (s
         )}
       </div>
 
-      <div className="flex items-center justify-between mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="flex items-center gap-1 pl-1" style={{ fontFamily: MONO, fontSize: 10, color: "#6e7681" }}>
+      <div className="flex items-center justify-between mt-0.5">
+        <span className="flex items-center gap-1 pl-1 opacity-0 group-hover:opacity-100 transition-opacity" style={{ fontFamily: MONO, fontSize: 10, color: "#6e7681" }}>
           <Zap className="w-2.5 h-2.5" />
           {msg.model ?? "Agent IA"}
         </span>
-        <CopyButton text={msg.content} />
+        <div className="flex items-center gap-1">
+          {repoUrl && (
+            <a
+              href={msg.commitSha ? `${repoUrl}/commit/${msg.commitSha}` : repoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Voir sur GitHub"
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                fontFamily: MONO, fontSize: 10, color: "#3fb950",
+                textDecoration: "none", padding: "2px 6px", borderRadius: 4,
+                border: "1px solid #238636", background: "rgba(35,134,54,0.1)",
+              }}
+            >
+              <CloudUpload style={{ width: 9, height: 9 }} />
+              {msg.commitSha ? `Voir commit ${msg.commitSha.slice(0,7)}` : "Voir sur GitHub"}
+            </a>
+          )}
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <CopyButton text={msg.content} />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -650,6 +671,28 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
   const [llmHealth, setLlmHealth] = useState<ProviderStatus[] | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
 
+  /* ---- User memory / custom instructions ---- */
+  const [userInstructions, setUserInstructions] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("agent-ide-user-instructions") ?? "[]") as string[]; }
+    catch { return []; }
+  });
+  const saveInstruction = useCallback((instruction: string) => {
+    const trimmed = instruction.trim();
+    if (!trimmed) return;
+    setUserInstructions(prev => {
+      const next = [...prev.filter(i => i !== trimmed), trimmed];
+      try { localStorage.setItem("agent-ide-user-instructions", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  const removeInstruction = useCallback((idx: number) => {
+    setUserInstructions(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      try { localStorage.setItem("agent-ide-user-instructions", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -756,6 +799,20 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
     const text = input.trim();
     if ((!text && !imageDataUrl) || isPending) return;
 
+    /* ---- Detect "mémorise ça / mémorise ceci / souviens-toi" ---- */
+    const memoriseTriggers = /m[ée]morise[\s-]?(ça|ceci|cela|this)?$|souviens-toi[\s-]?(de\s+ça)?$/i;
+    const explicitMemory = /m[ée]morise\s*:\s*(.+)/i;
+    const explicitMatch = text.match(explicitMemory);
+    if (explicitMatch?.[1]) {
+      saveInstruction(explicitMatch[1].trim());
+      setInput("");
+      return;
+    }
+    if (memoriseTriggers.test(text)) {
+      const instruction = text.replace(memoriseTriggers, "").trim().replace(/[,;.!?]+$/, "").trim();
+      if (instruction) { saveInstruction(instruction); setInput(""); return; }
+    }
+
     let imageBase64: string | null = null;
     let imageMime: string | null = null;
     if (imageDataUrl) {
@@ -822,6 +879,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
           currentFile: currentPath ?? null,
           imageBase64,
           imageMime,
+          userInstructions: userInstructions.length > 0 ? userInstructions.map(i => `- ${i}`).join("\n") : null,
           model: selectedModel === "auto" ? null : selectedModel,
           history,
           _githubToken: fallbackToken,
@@ -1057,6 +1115,29 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
         </div>
       )}
 
+      {/* ── Mémoire / Préférences sauvegardées ── */}
+      {userInstructions.length > 0 && (
+        <div
+          className="shrink-0 px-3 py-1.5 flex flex-wrap gap-1"
+          style={{ borderBottom: "1px solid #21262d", background: "#0d1117" }}
+        >
+          {userInstructions.map((inst, idx) => (
+            <span
+              key={idx}
+              className="flex items-center gap-1 rounded-full px-2 py-0.5"
+              style={{ background: "rgba(56,139,253,0.1)", border: "1px solid rgba(56,139,253,0.3)", fontFamily: MONO, fontSize: 9.5, color: "#388bfd" }}
+            >
+              📌 {inst.length > 40 ? inst.slice(0, 40) + "…" : inst}
+              <button
+                onClick={() => removeInstruction(idx)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#6e7681", lineHeight: 1, padding: 0 }}
+                title="Supprimer cette préférence"
+              >×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* ── Messages ── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {messages.length === 0 && (
@@ -1090,7 +1171,7 @@ export function ChatPanel({ currentPath, repo, onApplyCode: _onApplyCode, onAgen
               </div>
             </div>
           ) : (
-            <AgentResultCard key={i} msg={msg} onSuggestion={(s) => { setInput(s); inputRef.current?.focus(); }} />
+            <AgentResultCard key={i} msg={msg} repo={repo || undefined} onSuggestion={(s) => { setInput(s); inputRef.current?.focus(); }} />
           )
         )}
 

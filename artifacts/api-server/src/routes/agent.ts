@@ -563,9 +563,12 @@ function cleanResponse(text: string): string {
 /*  System prompt                                                       */
 /* ------------------------------------------------------------------ */
 
-function buildSystemPrompt(fileTree: string[]): string {
+function buildSystemPrompt(fileTree: string[], userInstructions?: string): string {
   const hasProject = fileTree.length > 0;
-  return `Tu es un assistant IA polyvalent et expert en développement web, similaire à l'agent Replit. Tu es à la fois :
+  const instructionBlock = userInstructions?.trim()
+    ? `\n\n## 📌 Préférences mémorisées par l'utilisateur (APPLIQUE-LES TOUJOURS)\n${userInstructions.trim()}\n---`
+    : "";
+  return `Tu es un assistant IA polyvalent et expert en développement web, similaire à l'agent Replit. Tu es à la fois :${instructionBlock}
 - Un **développeur senior** capable de lire, créer, modifier et supprimer des fichiers dans un dépôt GitHub
 - Un **assistant conversationnel** qui répond à toutes les questions : programmation, concepts, debug, architecture, technologies, ou même des questions générales
 
@@ -691,6 +694,7 @@ interface AgentRunInput {
   imageMime?: string | null;
   model?: string | null;
   history?: { role: string; content: string }[];
+  userInstructions?: string | null;
 }
 
 interface FileDiff {
@@ -722,7 +726,7 @@ async function runAgenticLoop(
   onProgress?: ProgressFn,
   autoCommit = true
 ): Promise<AgentRunResult> {
-  const { message, currentFile, imageBase64, imageMime, history, model } = input;
+  const { message, currentFile, imageBase64, imageMime, history, model, userInstructions } = input;
   const image: ImageCtx | undefined =
     imageBase64 && imageMime ? { base64: imageBase64, mime: imageMime } : undefined;
 
@@ -744,7 +748,7 @@ async function runAgenticLoop(
     archContext = await autoReadArchitectureFiles(kit!, owner!, repo!, fileTree);
   }
 
-  const systemPrompt = buildSystemPrompt(fileTree);
+  const systemPrompt = buildSystemPrompt(fileTree, userInstructions ?? undefined);
 
   /* 3. Build initial user message */
   let userMsg = message;
@@ -977,7 +981,10 @@ function parseAgentRequest(body: unknown):
     }
   }
 
-  return { ok: true, input: parsed.data, kit, owner, repo, keys: { claudeKey, groqKey, geminiKey, openrouterKey, openaiKey } };
+  const bodyObj2 = body as Record<string, unknown>;
+  const userInstructions = typeof bodyObj2["userInstructions"] === "string" ? bodyObj2["userInstructions"] : null;
+
+  return { ok: true, input: { ...parsed.data, userInstructions }, kit, owner, repo, keys: { claudeKey, groqKey, geminiKey, openrouterKey, openaiKey } };
 }
 
 /* ------------------------------------------------------------------ */
