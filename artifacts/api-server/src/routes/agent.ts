@@ -195,7 +195,8 @@ async function callGroq(
   const textModels = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "gemma2-9b-it",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
     "mixtral-8x7b-32768",
   ];
 
@@ -217,7 +218,7 @@ async function callGroq(
 
   for (const model of modelsToTry) {
     // For smaller models, truncate to last 6 messages to avoid 413
-    const isSmallModel = model.includes("8b") || model.includes("gemma") || model.includes("mixtral");
+    const isSmallModel = model.includes("8b") || model.includes("gemma") || model.includes("mixtral") || model.includes("3b");
     const msgs = isSmallModel
       ? [messages[0]!, ...messages.slice(1).slice(-5)].filter(Boolean)
       : buildMessages(model);
@@ -233,8 +234,8 @@ async function callGroq(
     }
     const body = await res.text().catch(() => "");
     lastErrors.push(`${model} ${res.status}: ${body.slice(0, 100)}`);
-    // Retry on 429 (rate limit) or 413 (too large) — stop on auth errors
-    if (res.status !== 429 && res.status !== 413) break;
+    // Retry on 429 (rate limit), 413 (too large), 400 (sometimes decommissioned models) — stop on auth errors
+    if (res.status !== 429 && res.status !== 413 && res.status !== 400) break;
   }
 
   return { ok: false, err: `Groq: ${lastErrors.join(" → ")}` };
@@ -249,8 +250,9 @@ async function callGemini(
   const geminiModels = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-8b-latest",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-pro",
   ];
 
   const userParts: object[] = [{ text: userMessage }];
@@ -279,7 +281,8 @@ async function callGemini(
     }
     const body = await res.text().catch(() => "");
     lastErrors.push(`${model} ${res.status}: ${body.slice(0, 100)}`);
-    if (res.status !== 429) break;
+    // Retry on 429 (quota) or 404 (model alias not found on this key)
+    if (res.status !== 429 && res.status !== 404) break;
   }
 
   return { ok: false, err: `Gemini: ${lastErrors.join(" → ")}` };
@@ -335,9 +338,12 @@ async function callOpenRouter(
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
   const freeModels = [
     "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-r1-distill-llama-70b:free",
     "qwen/qwen-2.5-72b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
+    "meta-llama/llama-4-scout:free",
     "google/gemma-3-27b-it:free",
+    "mistralai/mistral-7b-instruct:free",
+    "meta-llama/llama-3.2-3b-instruct:free",
   ];
 
   const lastErrors: string[] = [];
