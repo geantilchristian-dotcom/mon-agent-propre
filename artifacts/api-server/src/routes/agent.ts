@@ -196,17 +196,16 @@ async function callGroq(
   const visionModels = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"];
   const visionModel = visionModels[0]!;
   // Full cascade of Groq models — ordered by quality, each with a different rate-limit bucket
-  // Groq active models July 2025 — decommissioned: deepseek-r1, qwen-qwq-32b, llama-3.1-70b
+  // Groq active models July 2025 — many decommissioned, only confirmed-active listed
   const fullTextModels = [
-    "llama-3.3-70b-versatile",          // active, may rate-limit → try next
-    "llama3-70b-8192",                  // older llama3, still active on Groq
-    "gemma2-9b-it",                     // active, reliable
-    "llama3-8b-8192",                   // older llama3-8b, still active
-    "llama-3.2-3b-preview",             // small, active
-    "llama-3.1-8b-instant",             // last resort (413 risk on large prompts)
+    "llama-3.3-70b-versatile",          // active (may 429 → next)
+    "mixtral-8x7b-32768",              // Mixtral MoE, still active
+    "llama-3.2-3b-preview",            // small, active
+    "llama-3.1-8b-instant",            // fast small model, active
+    "llama-3.2-1b-preview",            // smallest, always available
   ];
   const textModels = only70b
-    ? fullTextModels.slice(0, 3)        // skip small models in auto mode
+    ? fullTextModels.slice(0, 2)        // only large models in auto mode
     : fullTextModels;
 
   const buildMessages = (model: string) => messages.map((m, i) => {
