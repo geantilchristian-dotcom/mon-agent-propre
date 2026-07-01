@@ -479,8 +479,8 @@ async function callLLM(
   } else if (preferred === "gemini") {
     result = await tryGemini() ?? await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryOpenRouter();
   } else {
-    // auto: Claude first (best quality), then GPT, then Groq, Gemini, OpenRouter
-    result = await tryClaude() ?? await tryGPT() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
+    // auto: Groq first (free, fast), then Gemini, then OpenRouter, then Claude, then GPT
+    result = await tryGroq() ?? await tryGemini() ?? await tryOpenRouter() ?? await tryClaude() ?? await tryGPT();
   }
 
   if (!result) {
