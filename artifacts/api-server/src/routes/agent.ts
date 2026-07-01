@@ -170,7 +170,6 @@ async function callGroq(
   const visionModel = "llama-3.2-11b-vision-preview";
   const textModels = [
     "llama-3.3-70b-versatile",
-    "llama-3.1-70b-versatile",
     "llama-3.1-8b-instant",
     "gemma2-9b-it",
     "mixtral-8x7b-32768",
@@ -302,6 +301,47 @@ async function callClaude(
   return { ok: true, text: d.content.find((c) => c.type === "text")?.text ?? "" };
 }
 
+/* ------------------------------------------------------------------ */
+/*  OpenRouter — OpenAI-compatible, many free models                   */
+/* ------------------------------------------------------------------ */
+
+async function callOpenRouter(
+  apiKey: string,
+  messages: OAIMsg[],
+): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
+  const freeModels = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen-2.5-72b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemma-3-27b-it:free",
+  ];
+
+  const lastErrors: string[] = [];
+
+  for (const model of freeModels) {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": "https://mon-agent-propre.onrender.com",
+        "X-Title": "Agent IDE",
+      },
+      body: JSON.stringify({ model, messages, max_tokens: 8192, temperature: 0.2 }),
+    });
+    if (res.ok) {
+      const d = (await res.json()) as { choices: { message: { content: string } }[] };
+      const text = d.choices[0]?.message?.content ?? "";
+      if (text) return { ok: true, text, model: model.split("/").pop()?.replace(":free", "") ?? model };
+    }
+    const body = await res.text().catch(() => "");
+    lastErrors.push(`${model.split("/").pop()} ${res.status}: ${body.slice(0, 80)}`);
+    if (res.status === 401) break;
+  }
+
+  return { ok: false, err: `OpenRouter: ${lastErrors.join(" → ")}` };
+}
+
 type PreferredModel = "auto" | "claude" | "groq" | "gemini";
 
 async function callLLM(
@@ -310,7 +350,8 @@ async function callLLM(
   geminiKey?: string,
   image?: ImageCtx,
   claudeKey?: string,
-  preferred: PreferredModel = "auto"
+  preferred: PreferredModel = "auto",
+  openrouterKey?: string,
 ): Promise<{ text: string; model: string }> {
 
   const errors: string[] = [];
@@ -341,16 +382,24 @@ async function callLLM(
     return null;
   };
 
+  const tryOpenRouter = async () => {
+    if (!openrouterKey) return null;
+    const r = await callOpenRouter(openrouterKey, messages);
+    if (r.ok) return { text: r.text, model: `OpenRouter · ${r.model}` };
+    errors.push(r.err);
+    return null;
+  };
+
   let result: { text: string; model: string } | null = null;
 
   if (preferred === "claude") {
-    result = await tryClaude() ?? await tryGroq() ?? await tryGemini();
+    result = await tryClaude() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
   } else if (preferred === "groq") {
-    result = await tryGroq() ?? await tryClaude() ?? await tryGemini();
+    result = await tryGroq() ?? await tryClaude() ?? await tryGemini() ?? await tryOpenRouter();
   } else if (preferred === "gemini") {
-    result = await tryGemini() ?? await tryClaude() ?? await tryGroq();
+    result = await tryGemini() ?? await tryClaude() ?? await tryGroq() ?? await tryOpenRouter();
   } else {
-    result = await tryClaude() ?? await tryGroq() ?? await tryGemini();
+    result = await tryClaude() ?? await tryGroq() ?? await tryGemini() ?? await tryOpenRouter();
   }
 
   if (!result) {
@@ -554,7 +603,7 @@ async function runAgenticLoop(
   owner: string | null,
   repo: string | null,
   input: AgentRunInput,
-  keys: { claudeKey?: string; groqKey?: string; geminiKey?: string },
+  keys: { claudeKey?: string; groqKey?: string; geminiKey?: string; openrouterKey?: string },
   onProgress?: ProgressFn
 ): Promise<AgentRunResult> {
   const { message, currentFile, imageBase64, imageMime, history, model } = input;
@@ -611,7 +660,7 @@ async function runAgenticLoop(
     let turn: { text: string; model: string } | null = null;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const t = await callLLM(msgs, keys.groqKey, keys.geminiKey, turnCount === 1 ? image : undefined, keys.claudeKey, preferred);
+        const t = await callLLM(msgs, keys.groqKey, keys.geminiKey, turnCount === 1 ? image : undefined, keys.claudeKey, preferred, keys.openrouterKey);
         if (t.text.trim().length > 50) {
           turn = t;
           break;
@@ -706,7 +755,7 @@ async function runAgenticLoop(
 /* ------------------------------------------------------------------ */
 
 function parseAgentRequest(body: unknown):
-  | { ok: true; input: AgentRunInput; kit: Octokit | null; owner: string | null; repo: string | null; keys: { claudeKey?: string; groqKey?: string; geminiKey?: string }; error?: never }
+  | { ok: true; input: AgentRunInput; kit: Octokit | null; owner: string | null; repo: string | null; keys: { claudeKey?: string; groqKey?: string; geminiKey?: string; openrouterKey?: string }; error?: never }
   | { ok: false; error: string; status: number } {
   const parsed = RunAgentBody.safeParse(body);
   if (!parsed.success) return { ok: false, error: "Corps de requête invalide", status: 400 };
@@ -714,9 +763,10 @@ function parseAgentRequest(body: unknown):
   const claudeKey = process.env["ANTHROPIC_API_KEY"];
   const groqKey = process.env["GROQ_API_KEY"];
   const geminiKey = process.env["GEMINI_API_KEY"];
+  const openrouterKey = process.env["OPENROUTER_KEY"];
 
-  if (!claudeKey && !groqKey && !geminiKey) {
-    return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY ou GEMINI_API_KEY dans les variables d'environnement.", status: 500 };
+  if (!claudeKey && !groqKey && !geminiKey && !openrouterKey) {
+    return { ok: false, error: "Aucune clé IA configurée. Ajoutez ANTHROPIC_API_KEY, GROQ_API_KEY, GEMINI_API_KEY ou OPENROUTER_KEY dans les variables d'environnement.", status: 500 };
   }
 
   /* If server-side state was lost (e.g. after a restart), recover from
@@ -741,7 +791,7 @@ function parseAgentRequest(body: unknown):
     }
   }
 
-  return { ok: true, input: parsed.data, kit, owner, repo, keys: { claudeKey, groqKey, geminiKey } };
+  return { ok: true, input: parsed.data, kit, owner, repo, keys: { claudeKey, groqKey, geminiKey, openrouterKey } };
 }
 
 /* ------------------------------------------------------------------ */
