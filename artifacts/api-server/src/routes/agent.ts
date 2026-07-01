@@ -193,10 +193,21 @@ async function callGroq(
   /** If true, only try the 70b model (skip 8b to avoid 413 on large prompts) */
   only70b = false,
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
-  const visionModel = "llama-3.2-11b-vision-preview";
+  const visionModels = ["llama-3.2-11b-vision-preview", "llama-4-scout-17b-16e-instruct"];
+  const visionModel = visionModels[0]!;
+  // Full cascade of Groq models — ordered by quality, each with a different rate-limit bucket
+  const fullTextModels = [
+    "llama-3.3-70b-versatile",          // flagship, 128k context
+    "llama-4-scout-17b-16e-instruct",   // Llama 4, fast and capable
+    "deepseek-r1-distill-llama-70b",    // reasoning model
+    "qwen-qwq-32b",                     // Qwen reasoning, 128k context
+    "llama-3.1-70b-versatile",          // fallback 70b
+    "gemma2-9b-it",                     // small but always available
+    "llama-3.1-8b-instant",             // last resort (413 risk on large prompts)
+  ];
   const textModels = only70b
-    ? ["llama-3.3-70b-versatile"]
-    : ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+    ? fullTextModels.slice(0, 5)        // skip small models in auto mode
+    : fullTextModels;
 
   const buildMessages = (model: string) => messages.map((m, i) => {
     if (image && m.role === "user" && i === messages.findIndex((x) => x.role === "user")) {
@@ -341,14 +352,20 @@ async function callOpenRouter(
   apiKey: string,
   messages: OAIMsg[],
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
+  // 12 free models on OpenRouter — each has its own independent rate-limit bucket
   const freeModels = [
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-r1-distill-llama-70b:free",
-    "qwen/qwen-2.5-72b-instruct:free",
-    "meta-llama/llama-4-scout:free",
-    "google/gemma-3-27b-it:free",
-    "mistralai/mistral-7b-instruct:free",
-    "meta-llama/llama-3.2-3b-instruct:free",
+    "meta-llama/llama-4-scout:free",                        // Llama 4 Scout (newest)
+    "meta-llama/llama-4-maverick:free",                     // Llama 4 Maverick
+    "meta-llama/llama-3.3-70b-instruct:free",               // Llama 3.3 70B
+    "deepseek/deepseek-r1-distill-llama-70b:free",          // DeepSeek R1 reasoning
+    "deepseek/deepseek-chat-v3-0324:free",                  // DeepSeek Chat v3
+    "qwen/qwq-32b:free",                                    // Qwen QwQ 32B reasoning
+    "qwen/qwen-2.5-72b-instruct:free",                      // Qwen 2.5 72B
+    "nvidia/llama-3.1-nemotron-70b-instruct:free",          // NVIDIA Nemotron 70B
+    "mistralai/mistral-small-3.2-24b-instruct:free",        // Mistral Small 24B
+    "google/gemma-3-27b-it:free",                           // Gemma 3 27B
+    "mistralai/mistral-7b-instruct:free",                   // Mistral 7B (fallback)
+    "meta-llama/llama-3.2-3b-instruct:free",               // Llama 3.2 3B (last resort)
   ];
 
   const lastErrors: string[] = [];
