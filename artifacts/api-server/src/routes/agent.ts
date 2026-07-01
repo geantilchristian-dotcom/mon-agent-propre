@@ -351,18 +351,21 @@ async function callOpenRouter(
   apiKey: string,
   messages: OAIMsg[],
 ): Promise<{ ok: true; text: string; model: string } | { ok: false; err: string }> {
-  // OpenRouter free models — confirmed active July 2025 (removed all 404 paid-only models)
+  // OpenRouter free models — verified via /api/v1/models endpoint on 2026-07-01
   const freeModels = [
-    "meta-llama/llama-3.3-70b-instruct:free",     // 429 = rate-limited but EXISTS
-    "mistralai/mistral-7b-instruct:free",          // classic, consistently free
-    "meta-llama/llama-3.2-11b-vision-instruct:free", // vision + text, free
-    "meta-llama/llama-3.2-3b-instruct:free",      // small, reliable free tier
-    "nousresearch/hermes-3-llama-3.1-405b:free",  // large model, free tier
-    "microsoft/phi-3-medium-128k-instruct:free",  // Microsoft, free tier
-    "moonshotai/kimi-k2:free",                    // Moonshot, new free model
-    "tngtech/deepseek-r1t-chimera:free",          // DeepSeek chimera, free
-    "sarvamai/sarvam-m:free",                     // Sarvam, free
-    "meta-llama/llama-3.1-8b-instruct:free",      // small llama, last resort
+    "qwen/qwen3-coder:free",                       // Coding specialist, 1M ctx ★
+    "openai/gpt-oss-120b:free",                    // GPT OSS 120B
+    "openai/gpt-oss-20b:free",                     // GPT OSS 20B
+    "nvidia/nemotron-3-ultra-550b-a55b:free",      // NVIDIA 550B MoE
+    "nvidia/nemotron-3-super-120b-a12b:free",      // NVIDIA 120B
+    "google/gemma-4-31b-it:free",                  // Google Gemma 4
+    "google/gemma-4-26b-a4b-it:free",              // Google Gemma 4 MoE
+    "qwen/qwen3-next-80b-a3b-instruct:free",       // Qwen 3 80B
+    "meta-llama/llama-3.3-70b-instruct:free",      // Llama 3.3 70B
+    "nousresearch/hermes-3-llama-3.1-405b:free",   // Hermes 405B
+    "poolside/laguna-m.1:free",                    // Poolside code model
+    "nvidia/nemotron-3-nano-30b-a3b:free",         // NVIDIA Nano 30B
+    "meta-llama/llama-3.2-3b-instruct:free",       // small fallback
   ];
 
   const lastErrors: string[] = [];
