@@ -9,6 +9,10 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.14",
@@ -56,9 +60,7 @@
     "input-otp": "^1.4.2",
     "lucide-react": "catalog:",
     "next-themes": "^0.4.6",
-    "react": "catalog:",
     "react-day-picker": "^9.14.0",
-    "react-dom": "catalog:",
     "react-hook-form": "^7.80.0",
     "react-resizable-panels": "^2.1.9",
     "recharts": "^2.15.4",
