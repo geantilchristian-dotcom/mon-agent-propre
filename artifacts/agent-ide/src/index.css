@@ -131,41 +131,40 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  /* Adjusted for a lighter dark theme */
-  --background: 220 15% 12%; /* Lighter background */
-  --foreground: 210 10% 90%;  /* Slightly darker foreground for contrast */
-  --border: 220 15% 20%;     /* Lighter border */
-  --input: 220 15% 20%;      /* Lighter input */
-  --ring: 212 90% 65%;       /* Slightly lighter ring */
-  --card: 220 15% 14%;       /* Lighter card background */
-  --card-foreground: 210 10% 90%; /* Matching foreground */
-  --card-border: 220 15% 20%;  /* Matching border */
-  --popover: 220 15% 14%;     /* Lighter popover background */
-  --popover-foreground: 210 10% 90%; /* Matching foreground */
-  --popover-border: 220 15% 20%; /* Matching border */
-  --primary: 212 90% 65%;     /* Slightly lighter primary */
+  --background: 222 15% 6%;
+  --foreground: 210 20% 95%;
+  --border: 220 15% 15%;
+  --input: 220 15% 15%;
+  --ring: 212 90% 60%;
+  --card: 222 15% 8%;
+  --card-foreground: 210 20% 95%;
+  --card-border: 220 15% 15%;
+  --popover: 222 15% 8%;
+  --popover-foreground: 210 20% 95%;
+  --popover-border: 220 15% 15%;
+  --primary: 212 90% 60%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 215 15% 18%;   /* Lighter secondary */
-  --secondary-foreground: 210 10% 90%; /* Matching foreground */
-  --muted: 215 15% 18%;       /* Lighter muted */
-  --muted-foreground: 210 10% 70%; /* Adjusted muted foreground */
-  --accent: 215 15% 20%;      /* Lighter accent */
-  --accent-foreground: 210 10% 90%; /* Matching foreground */
-  --destructive: 0 84.2% 60.2%; /* Kept destructive color */
+  --secondary: 220 15% 12%;
+  --secondary-foreground: 210 20% 95%;
+  --muted: 220 15% 12%;
+  --muted-foreground: 215 15% 60%;
+  --accent: 220 15% 15%;
+  --accent-foreground: 210 20% 95%;
+  --destructive: 0 84.2% 60.2%;
   --destructive-foreground: 210 40% 98%;
-  --chart-1: 220 70% 55%;     /* Slightly lighter chart colors */
-  --chart-2: 160 60% 50%;
-  --chart-3: 30 80% 60%;
-  --chart-4: 280 65% 65%;
-  --chart-5: 340 75% 60%;
-  --sidebar: 220 15% 10%;     /* Lighter sidebar background */
-  --sidebar-foreground: 210 10% 85%; /* Adjusted sidebar foreground */
-  --sidebar-border: 220 15% 18%; /* Matching sidebar border */
-  --sidebar-primary: 212 90% 65%; /* Matching sidebar primary */
+  --chart-1: 220 70% 50%;
+  --chart-2: 160 60% 45%;
+  --chart-3: 30 80% 55%;
+  --chart-4: 280 65% 60%;
+  --chart-5: 340 75% 55%;
+  --sidebar: 222 15% 5%;
+  --sidebar-foreground: 210 20% 85%;
+  --sidebar-border: 220 15% 12%;
+  --sidebar-primary: 212 90% 60%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 215 15% 18%;  /* Matching sidebar accent */
-  --sidebar-accent-foreground: 210 10% 90%; /* Matching sidebar accent foreground */
-  --sidebar-ring: 212 90% 65%;   /* Matching sidebar ring */
+  --sidebar-accent: 220 15% 12%;
+  --sidebar-accent-foreground: 210 20% 95%;
+  --sidebar-ring: 212 90% 60%;
 
   --primary-border: hsl(var(--primary));
   --secondary-border: hsl(var(--secondary));
